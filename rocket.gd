@@ -30,8 +30,10 @@ var fuel: float = 1.0
 var boosting: bool = false
 ## Set by the on-screen BOOST button (touch); keyboard uses the "boost" input action.
 var boost_button_held: bool = false
-## Touches that start inside this rect (the BOOST button) don't steer.
-var no_steer_rect: Rect2 = Rect2()
+## Touches that start inside these rects (on-screen BOOST / MISSILE buttons) don't steer.
+var no_steer_rects: Array[Rect2] = []
+## Side-to-side speed multiplier (the RCS Jets mod raises it).
+var agility: float = 1.0
 
 ## Screen x position of the finger steering the rocket, or NAN when not touching.
 var touch_x: float = NAN
@@ -51,7 +53,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# steer with one finger while holding BOOST with another.
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			if _steer_finger == -1 and not no_steer_rect.has_point(event.position):
+			if _steer_finger == -1 and not _on_button(event.position):
 				_steer_finger = event.index
 				touch_x = event.position.x
 		elif event.index == _steer_finger:
@@ -83,8 +85,8 @@ func _process(delta: float) -> void:
 		if fuel <= 0.0:
 			_detach_booster()
 
-	var top_speed := max_speed * (boost_multiplier if boosting else 1.0)
-	var thrust := acceleration * (boost_multiplier if boosting else 1.0)
+	var top_speed := max_speed * agility * (boost_multiplier if boosting else 1.0)
+	var thrust := acceleration * agility * (boost_multiplier if boosting else 1.0)
 
 	var dir := Input.get_axis("ui_left", "ui_right")
 	if Input.is_physical_key_pressed(KEY_A):
@@ -120,6 +122,13 @@ func _process(delta: float) -> void:
 
 	# Bank into the movement.
 	rotation = lerpf(rotation, velocity_x / max_speed * 0.32, 8.0 * delta)
+
+
+func _on_button(at: Vector2) -> bool:
+	for rect in no_steer_rects:
+		if rect.has_point(at):
+			return true
+	return false
 
 
 ## Fill the tank back up (refuel station). Does nothing once the booster has fallen off.

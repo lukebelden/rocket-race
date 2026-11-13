@@ -4,6 +4,7 @@
 [ext_resource type="Script" uid="uid://ciqjxbt6ndw4v" path="res://rocket.gd" id="2_rocket"]
 [ext_resource type="Script" path="res://cockpit.gd" id="3_cockpit"]
 [ext_resource type="Script" path="res://caution_light.gd" id="4_caution"]
+[ext_resource type="Script" path="res://mod_icon.gd" id="5_modicon"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rocket"]
 radius = 12.0
@@ -71,10 +72,10 @@ corner_radius_bottom_left = 14
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_panel"]
 content_margin_left = 40.0
-content_margin_top = 32.0
+content_margin_top = 22.0
 content_margin_right = 40.0
-content_margin_bottom = 32.0
-bg_color = Color(0.04, 0.05, 0.12, 0.85)
+content_margin_bottom = 22.0
+bg_color = Color(0.04, 0.05, 0.12, 0.95)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -126,6 +127,38 @@ corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_caution"]
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+bg_color = Color(0.22, 0.13, 0.03, 0.9)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 0.7, 0.15, 0.95)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_mods"]
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+bg_color = Color(0.05, 0.07, 0.13, 0.78)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.45, 0.55, 0.8, 0.8)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
 
 [sub_resource type="Theme" id="Theme_ui"]
 default_font_size = 28
@@ -192,7 +225,7 @@ theme_override_font_sizes/font_size = 24
 vertical_alignment = 1
 grow_horizontal = 0
 theme_override_colors/font_color = Color(1, 0.8, 0.45, 1)
-text = "Level 1 · The Moon"
+text = "Level 1 Ã‚Â· The Moon"
 horizontal_alignment = 2
 
 [node name="LevelBanner" type="Label" parent="UI/Root"]
@@ -305,7 +338,7 @@ theme_override_constants/separation = 0
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 14
-text = "NAV BEACON · NEXT: LVL 3"
+text = "NAV BEACON Ã‚Â· NEXT: LVL 3"
 
 [node name="NavValue" type="Label" parent="UI/Root/Dashboard/NavBox"]
 layout_mode = 2
@@ -339,7 +372,7 @@ theme_override_constants/separation = 2
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 12
-text = "SHIP COMPUTER · TIP"
+text = "SHIP COMPUTER Ã‚Â· TIP"
 
 [node name="TipText" type="Label" parent="UI/Root/TipPanel/VBox"]
 custom_minimum_size = Vector2(290, 0)
@@ -348,6 +381,89 @@ theme_override_colors/font_color = Color(0.88, 0.92, 1, 1)
 theme_override_font_sizes/font_size = 15
 text = "Your booster can be refilled at refuel stations."
 autowrap_mode = 3
+
+[node name="ModPanel" type="PanelContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 30.0
+offset_top = -251.0
+offset_right = 280.0
+offset_bottom = -250.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_mods")
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/ModPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="ModTitle" type="Label" parent="UI/Root/ModPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "SHIP MODS · 2 SLOTS"
+
+[node name="Slot1" type="HBoxContainer" parent="UI/Root/ModPanel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="Control" parent="UI/Root/ModPanel/VBox/Slot1"]
+custom_minimum_size = Vector2(38, 38)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("5_modicon")
+
+[node name="Text" type="VBoxContainer" parent="UI/Root/ModPanel/VBox/Slot1"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = -2
+
+[node name="Name" type="Label" parent="UI/Root/ModPanel/VBox/Slot1/Text"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Empty slot"
+
+[node name="Detail" type="Label" parent="UI/Root/ModPanel/VBox/Slot1/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
+theme_override_font_sizes/font_size = 12
+text = "Get mods at stations"
+
+[node name="Slot2" type="HBoxContainer" parent="UI/Root/ModPanel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="Control" parent="UI/Root/ModPanel/VBox/Slot2"]
+custom_minimum_size = Vector2(38, 38)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("5_modicon")
+
+[node name="Text" type="VBoxContainer" parent="UI/Root/ModPanel/VBox/Slot2"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = -2
+
+[node name="Name" type="Label" parent="UI/Root/ModPanel/VBox/Slot2/Text"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Empty slot"
+
+[node name="Detail" type="Label" parent="UI/Root/ModPanel/VBox/Slot2/Text"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
+theme_override_font_sizes/font_size = 12
+text = "Get mods at stations"
 
 [node name="LaunchPrompt" type="Label" parent="UI/Root"]
 visible = false
@@ -403,12 +519,12 @@ layout_mode = 2
 
 [node name="VBox" type="VBoxContainer" parent="UI/Root/Menu/Panel"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 8
 
 [node name="Title" type="Label" parent="UI/Root/Menu/Panel/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
-theme_override_font_sizes/font_size = 54
+theme_override_font_sizes/font_size = 44
 text = "ROCKET DODGE"
 horizontal_alignment = 1
 
@@ -419,26 +535,165 @@ text = "Best: 0"
 horizontal_alignment = 1
 
 [node name="StartButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
-custom_minimum_size = Vector2(300, 64)
+custom_minimum_size = Vector2(300, 46)
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "Start"
 
-[node name="SettingsButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
-custom_minimum_size = Vector2(300, 64)
+[node name="ScoreboardButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
+custom_minimum_size = Vector2(300, 46)
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Scoreboard"
+
+[node name="SettingsButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
+custom_minimum_size = Vector2(300, 46)
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "Settings"
 
 [node name="QuitButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
-custom_minimum_size = Vector2(300, 64)
+custom_minimum_size = Vector2(300, 46)
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "Quit"
 
 [node name="HintLabel" type="Label" parent="UI/Root/Menu/Panel/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.8, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 16
 text = "Move: Left / Right or A / D"
 horizontal_alignment = 1
+
+[node name="Scoreboard" type="CenterContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 56.0
+offset_bottom = -76.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root/Scoreboard"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/Scoreboard/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="UI/Root/Scoreboard/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
+theme_override_font_sizes/font_size = 40
+text = "SCOREBOARD"
+horizontal_alignment = 1
+
+[node name="OnlineHeader" type="Label" parent="UI/Root/Scoreboard/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "GLOBAL Ã‚Â· ONLINE"
+
+[node name="OnlineCaution" type="PanelContainer" parent="UI/Root/Scoreboard/Panel/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_caution")
+
+[node name="HBox" type="HBoxContainer" parent="UI/Root/Scoreboard/Panel/VBox/OnlineCaution"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="CautionLamp" type="Control" parent="UI/Root/Scoreboard/Panel/VBox/OnlineCaution/HBox"]
+custom_minimum_size = Vector2(26, 26)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("4_caution")
+
+[node name="OnlineStatus" type="Label" parent="UI/Root/Scoreboard/Panel/VBox/OnlineCaution/HBox"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.8, 0.45, 1)
+theme_override_font_sizes/font_size = 16
+text = "CAUTION: Online scoreboard unavailable at this time."
+autowrap_mode = 3
+
+[node name="OnlineList" type="GridContainer" parent="UI/Root/Scoreboard/Panel/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/h_separation = 18
+theme_override_constants/v_separation = 2
+columns = 4
+
+[node name="LocalHeader" type="Label" parent="UI/Root/Scoreboard/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "YOUR TOP RUNS Ã‚Â· THIS DEVICE"
+
+[node name="LocalList" type="GridContainer" parent="UI/Root/Scoreboard/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 18
+theme_override_constants/v_separation = 2
+columns = 4
+
+[node name="BackButton" type="Button" parent="UI/Root/Scoreboard/Panel/VBox"]
+custom_minimum_size = Vector2(300, 50)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Back"
+
+[node name="StationMenu" type="CenterContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 56.0
+offset_bottom = -76.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root/StationMenu"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/StationMenu/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="UI/Root/StationMenu/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 1, 0.6, 1)
+theme_override_font_sizes/font_size = 32
+text = "DOCKED AT STATION"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="UI/Root/StationMenu/Panel/VBox"]
+custom_minimum_size = Vector2(480, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.85, 0.95, 1)
+theme_override_font_sizes/font_size = 16
+text = "Choose one service:"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Options" type="HBoxContainer" parent="UI/Root/StationMenu/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+alignment = 1
+
+[node name="Footer" type="Button" parent="UI/Root/StationMenu/Panel/VBox"]
+custom_minimum_size = Vector2(260, 44)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 20
+text = "Skip"
 
 [node name="Settings" type="CenterContainer" parent="UI/Root"]
 visible = false

@@ -6,10 +6,16 @@ const Station := preload("res://station.gd")
 const Rocket := preload("res://rocket.gd")
 const PlanetNode := preload("res://planet.gd")
 const StarLayer := preload("res://star_layer.gd")
+const ScoreboardService := preload("res://scoreboard_service.gd")
+const ModInfo := preload("res://mods.gd")
+const ModIcon := preload("res://mod_icon.gd")
+## How many of your best runs the local scoreboard keeps.
+const LOCAL_RUNS_KEPT := 8
 const SAVE_PATH := "user://save.cfg"
 
-## MENU -> READY (on the launch pad, waiting for Space/tap) -> INTRO (liftoff) -> PLAYING -> OVER
-enum State { MENU, READY, INTRO, PLAYING, OVER }
+## MENU -> READY (on the launch pad, waiting for Space/tap) -> INTRO (liftoff) -> PLAYING
+## -> (DOCKED at a station, then back to PLAYING) -> OVER
+enum State { MENU, READY, INTRO, PLAYING, DOCKED, OVER }
 enum Difficulty { EASY, NORMAL, HARD }
 
 ## [spawn interval multiplier, fall speed multiplier] per difficulty.
@@ -59,6 +65,8 @@ const SPACE_DARK := Color(0.03, 0.03, 0.08)
 ## Saved to disk (user://save.cfg), so they survive closing the game/page.
 static var best_score: float = 0.0
 static var difficulty: Difficulty = Difficulty.NORMAL
+## Your best runs on this device: [{score, level, date}], best first. Saved to disk.
+static var local_runs: Array = []
 ## Set by "Play Again" so the reloaded scene skips the menu.
 static var skip_menu: bool = false
 
@@ -85,6 +93,22 @@ var _tip_index: int = -1
 var _tip_timer: float = 0.0
 var _tips_triggered: Dictionary = {}  # context tips already shown this run
 var _tip_tween: Tween
+
+# Ship modifications (this run only). Two slots; "" = empty.
+var mods: Array[String] = ["", ""]
+var hull_max: float = 1.0  # 1.0 = 100%; Reinforced Hull raises it
+var missile_ammo: int = 0
+var missile_cooldown: float = 0.0
+var missiles: Array[Dictionary] = []  # {pos, vel, target, age}
+var missile_button: TouchScreenButton
+var radar_overlay: Control
+var _radar_had_blips: bool = false
+# Station docking menu.
+var _dock_station: Area2D = null
+var _dock_step: String = ""  # "service" -> "mod" -> "replace"
+var _offer: Array[String] = []
+var _pending_mod: String = ""
+var _mod_panel_key: String = ""  # what the mod panel currently shows (redraw only on change)
 var _last_space: float = -1.0
 var _drew_dynamic: bool = false
 # Last values shown on the HUD, so labels are only touched when something changes.
@@ -137,6 +161,16 @@ var touch_ui: bool = OS.has_feature("mobile") or OS.has_feature("web_android") o
 @onready var quit_button: Button = $UI/Root/Menu/Panel/VBox/QuitButton
 @onready var hint_label: Label = $UI/Root/Menu/Panel/VBox/HintLabel
 
+@onready var scoreboard_button: Button = $UI/Root/Menu/Panel/VBox/ScoreboardButton
+@onready var scoreboard: Control = $UI/Root/Scoreboard
+@onready var online_caution: PanelContainer = $UI/Root/Scoreboard/Panel/VBox/OnlineCaution
+@onready var online_lamp: Control = $UI/Root/Scoreboard/Panel/VBox/OnlineCaution/HBox/CautionLamp
+@onready var online_status: Label = $UI/Root/Scoreboard/Panel/VBox/OnlineCaution/HBox/OnlineStatus
+@onready var online_list: GridContainer = $UI/Root/Scoreboard/Panel/VBox/OnlineList
+@onready var local_list: GridContainer = $UI/Root/Scoreboard/Panel/VBox/LocalList
+@onready var scoreboard_back: Button = $UI/Root/Scoreboard/Panel/VBox/BackButton
+var scoreboard_service: Node
+
 @onready var settings: Control = $UI/Root/Settings
 @onready var difficulty_option: OptionButton = $UI/Root/Settings/Panel/VBox/DifficultyRow/DifficultyOption
 @onready var fullscreen_check: CheckButton = $UI/Root/Settings/Panel/VBox/FullscreenCheck
@@ -146,6 +180,14 @@ var touch_ui: bool = OS.has_feature("mobile") or OS.has_feature("web_android") o
 @onready var game_over: Control = $UI/Root/GameOver
 @onready var result_label: Label = $UI/Root/GameOver/Panel/VBox/ResultLabel
 @onready var game_over_title: Label = $UI/Root/GameOver/Panel/VBox/Title
+
+@onready var mod_panel: PanelContainer = $UI/Root/ModPanel
+@onready var mod_slots: Array = [$UI/Root/ModPanel/VBox/Slot1, $UI/Root/ModPanel/VBox/Slot2]
+@onready var station_menu: Control = $UI/Root/StationMenu
+@onready var station_title: Label = $UI/Root/StationMenu/Panel/VBox/Title
+@onready var station_subtitle: Label = $UI/Root/StationMenu/Panel/VBox/Subtitle
+@onready var station_options: HBoxContainer = $UI/Root/StationMenu/Panel/VBox/Options
+@onready var station_footer: Button = $UI/Root/StationMenu/Panel/VBox/Footer
 @onready var play_again_button: Button = $UI/Root/GameOver/Panel/VBox/PlayAgainButton
 @onready var menu_button: Button = $UI/Root/GameOver/Panel/VBox/MenuButton
 
@@ -159,6 +201,9 @@ func _ready() -> void:
 	_load_save()
 	_setup_boost_input()
 	_make_boost_button()
+	_make_missile_button()
+	_make_radar_overlay()
+	station_footer.pressed.connect(_on_station_footer)
 	_update_layout()
 	get_window().size_changed.connect(_update_layout)
 	rocket.booster_lost.connect(_on_booster_lost)
@@ -171,6 +216,12 @@ func _ready() -> void:
 
 	# Menu
 	start_button.pressed.connect(_go_to_pad)
+	scoreboard_button.pressed.connect(_open_scoreboard)
+	scoreboard_back.pressed.connect(_show_menu)
+	scoreboard_service = ScoreboardService.new()
+	add_child(scoreboard_service)
+	scoreboard_service.top_scores_loaded.connect(_on_online_scores)
+	scoreboard_service.top_scores_failed.connect(_on_online_failed)
 	settings_button.pressed.connect(_open_settings)
 	quit_button.pressed.connect(func() -> void: get_tree().quit())
 	# A web page can't close its own tab, so Quit would only freeze the game there.
@@ -210,7 +261,10 @@ func _process(delta: float) -> void:
 	_update_fragments(delta)
 	_update_damage_effects(delta)
 	_update_background()
-	if state == State.READY or state == State.PLAYING or state == State.OVER:
+	_update_missiles(delta)
+	_update_mod_panel()
+	_update_radar()
+	if state == State.READY or state == State.PLAYING or state == State.DOCKED or state == State.OVER:
 		_update_dashboard()
 
 	match state:
@@ -226,13 +280,19 @@ func _process(delta: float) -> void:
 
 	# Only redraw this node's own layer (Earth, clouds, smoke, debris) while something there
 	# is actually moving, plus one final frame to clear it.
-	var dynamic := state == State.INTRO or not smoke.is_empty() or not fragments.is_empty() or not pods.is_empty()
+	var dynamic := state == State.INTRO or not smoke.is_empty() or not fragments.is_empty() \
+		or not pods.is_empty() or not missiles.is_empty()
 	if dynamic or _drew_dynamic:
 		queue_redraw()
 	_drew_dynamic = dynamic
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Missile Pod mod: F / E fires.
+	if state == State.PLAYING and event.is_action_pressed("missile"):
+		get_viewport().set_input_as_handled()
+		_fire_missile()
+		return
 	# On the launch pad: Space (or a tap/click) launches when the player is ready.
 	if state != State.READY or ready_time < 0.25:
 		return
@@ -258,6 +318,10 @@ func _update_layout() -> void:
 	rocket.bottom_gap = console_height + 65.0
 	_position_boost_button()
 	_position_tip_panel(console_height)
+	# Ship mods panel mirrors the tips panel on the left side.
+	mod_panel.offset_bottom = tip_panel.offset_bottom
+	mod_panel.offset_top = mod_panel.offset_bottom - 1.0
+	mod_panel.offset_right = mod_panel.offset_left + (230.0 if portrait else 250.0)
 	for layer in bg_layers:
 		layer.build(get_viewport_rect().size)
 	_planet_level = 0  # re-place the planet for the new size
@@ -275,12 +339,94 @@ func _show_menu() -> void:
 	level_label.visible = false
 	dashboard.visible = false
 	boost_button.visible = false
+	missile_button.visible = false
+	station_menu.visible = false
 	settings.visible = false
+	scoreboard.visible = false
 	game_over.visible = false
 	launch_prompt.visible = false
 	menu.visible = true
 	start_button.grab_focus()
 	queue_redraw()
+
+
+func _open_scoreboard() -> void:
+	menu.visible = false
+	scoreboard.visible = true
+	scoreboard_back.grab_focus()
+	_fill_local_scores()
+	# Global list: asks the online service (reports "offline" until a server is hooked up).
+	online_list.visible = false
+	if scoreboard_service.is_configured():
+		online_lamp.on = false
+		_set_online_status("Connecting to scoreboard server…", Color(0.9, 0.85, 0.5))
+	scoreboard_service.fetch_top(8)
+
+
+func _fill_local_scores() -> void:
+	_clear_grid(local_list)
+	if local_runs.is_empty():
+		_grid_row(local_list, ["", "No runs yet. Go fly!", "", ""], Color(0.65, 0.68, 0.75))
+		return
+	_grid_row(local_list, ["#", "SCORE", "REACHED", "DATE"], Color(0.55, 0.6, 0.7))
+	for i in local_runs.size():
+		var run: Dictionary = local_runs[i]
+		var lvl := int(run.get("level", 1))
+		var color := Color(1, 0.85, 0.45) if i == 0 else Color(0.9, 0.92, 1)
+		_grid_row(local_list, ["%d" % (i + 1), "%d" % int(run.get("score", 0)),
+			"Lvl %d · %s" % [lvl, _planet(lvl)["name"]], str(run.get("date", ""))], color)
+
+
+func _on_online_scores(rows: Array) -> void:
+	_set_online_status("ONLINE · Global top pilots", Color(0.45, 1, 0.6))
+	online_lamp.on = false
+	_clear_grid(online_list)
+	_grid_row(online_list, ["#", "NAME", "SCORE", "LEVEL"], Color(0.55, 0.6, 0.7))
+	for i in rows.size():
+		var row = rows[i]
+		if row is Dictionary:
+			_grid_row(online_list, ["%d" % (i + 1), str(row.get("name", "?")).left(12),
+				"%d" % int(row.get("score", 0)), "Lvl %d" % int(row.get("level", 1))], Color(0.9, 0.92, 1))
+	online_list.visible = true
+
+
+## Online scoreboard not available: blinking caution lamp + notice, while your local runs
+## still show below.
+func _on_online_failed(reason: String) -> void:
+	online_lamp.on = true
+	if reason == "offline":
+		_set_online_status("CAUTION: Online scoreboard unavailable at this time.\nGlobal rankings are coming soon. Your own best runs are below.", Color(1, 0.8, 0.45))
+	else:
+		_set_online_status("CAUTION: Can't reach the scoreboard server right now (%s).\nPlease try again later." % reason, Color(1, 0.6, 0.45))
+	online_list.visible = false
+
+
+func _set_online_status(text: String, color: Color) -> void:
+	online_status.text = text
+	online_status.add_theme_color_override("font_color", color)
+
+
+func _clear_grid(grid: GridContainer) -> void:
+	for child in grid.get_children():
+		grid.remove_child(child)
+		child.queue_free()
+
+
+func _grid_row(grid: GridContainer, cells: Array, color: Color) -> void:
+	for text in cells:
+		var label := Label.new()
+		label.text = text
+		label.add_theme_font_size_override("font_size", 16)
+		label.add_theme_color_override("font_color", color)
+		grid.add_child(label)
+
+
+## Remember a finished run on this device (keeps your best few).
+func _record_run() -> void:
+	local_runs.append({"score": int(score), "level": level, "date": Time.get_date_string_from_system()})
+	local_runs.sort_custom(func(a, b) -> bool: return int(a["score"]) > int(b["score"]))
+	if local_runs.size() > LOCAL_RUNS_KEPT:
+		local_runs.resize(LOCAL_RUNS_KEPT)
 
 
 func _open_settings() -> void:
@@ -330,6 +476,7 @@ func _start_playing() -> void:
 	level_label.visible = true
 	dashboard.visible = true
 	boost_button.visible = touch_ui
+	missile_button.visible = touch_ui and mods.has("missile")
 	_update_hud()
 	_show_level_banner()
 
@@ -410,10 +557,17 @@ func _update_playing(delta: float) -> void:
 	# Boosting flies you forward faster: the whole world (asteroids, stations, stars, the
 	# planet) rushes past quicker, levels go by sooner, and score (= distance) climbs faster.
 	# The speed eases in and out instead of jumping.
-	var target_speed := FORWARD_BOOST if rocket.boosting else 1.0
+	# Bigger Thruster mod raises the cruising speed; boosting multiplies on top of it.
+	var cruise := ModInfo.THRUSTER_SPEED if mods.has("thruster") else 1.0
+	var target_speed := cruise * (FORWARD_BOOST if rocket.boosting else 1.0)
 	forward_speed = move_toward(forward_speed, target_speed, FORWARD_EASE * delta)
 	Obstacle.world_speed = forward_speed
 	var travelled := delta * forward_speed
+
+	# Healing Panel mod: slow hull repair over time.
+	if mods.has("healing") and hull < hull_max:
+		hull = minf(hull + ModInfo.HEAL_PER_SECOND * delta, hull_max)
+	missile_cooldown = maxf(missile_cooldown - delta, 0.0)
 
 	score += travelled * 10.0
 	level_time += travelled
@@ -467,7 +621,9 @@ func _general_tips() -> Array[String]:
 		"Hold %s to boost: you fly and score faster, but asteroids come at you quicker too." % boost_key,
 		"Your booster can be refilled at refuel stations. One appears every two planets.",
 		"If your booster runs completely dry it detaches, and you can't get it back.",
-		"Refuel stations also repair 25% of your hull. Fly straight into one to dock.",
+		"Dock at a station to choose: refuel the booster OR repair 25% hull, then pick a ship mod.",
+		"Your ship has 2 mod slots. Stations offer 2 random mods; when both slots are full you swap one out.",
+		"The Missile Pod holds 5 missiles and reloads automatically every time you dock.",
 		"Bigger asteroids do more hull damage. Small ones only scratch.",
 		"Orange-glowing asteroids don't fall straight: they sway or drift sideways.",
 		"The NAV BEACON shows the range to the next refuel station.",
@@ -492,7 +648,7 @@ func _context_tip() -> String:
 	if tip == "" and hull <= 0.5:
 		tip = _once("hull_low", "Hull damaged. Dock at a refuel station to repair 25%.")
 	if tip == "" and station_level == level and is_instance_valid(station_node) and not station_node.used:
-		tip = _once("station_%d" % level, "Station in range: fly into it to dock, refuel the booster and repair the hull.")
+		tip = _once("station_%d" % level, "Station in range: fly into it to dock. Choose fuel or hull repair, then a ship mod.")
 	if tip == "" and level == 2:
 		tip = _once("wobble", "From here on, orange-glowing asteroids sway and drift sideways. Watch them closely.")
 	return tip
@@ -554,6 +710,12 @@ func _setup_boost_input() -> void:
 		var event := InputEventKey.new()
 		event.physical_keycode = key
 		InputMap.action_add_event("boost", event)
+	# Missile Pod mod: F or E fires a missile.
+	InputMap.add_action("missile")
+	for key in [KEY_F, KEY_E]:
+		var event := InputEventKey.new()
+		event.physical_keycode = key
+		InputMap.action_add_event("missile", event)
 
 
 ## Round on-screen BOOST button for phones (multi-touch: hold it while steering).
@@ -605,10 +767,15 @@ func _position_boost_button() -> void:
 	if boost_button == null:
 		return
 	var size := get_viewport_rect().size
-	# Just above the console, bottom right.
+	# Just above the console: BOOST bottom right, MISSILE (when fitted) bottom left.
 	boost_button.position = Vector2(size.x - 128.0 - 30.0, size.y - cockpit.dash_height - 128.0 - 14.0)
-	# Touches starting on the button boost instead of steering.
-	rocket.no_steer_rect = Rect2(boost_button.position, Vector2(128, 128)).grow(16.0)
+	if missile_button:
+		missile_button.position = Vector2(30.0, size.y - cockpit.dash_height - 128.0 - 14.0)
+	# Touches starting on these buttons press them instead of steering.
+	rocket.no_steer_rects.clear()
+	rocket.no_steer_rects.append(Rect2(boost_button.position, Vector2(128, 128)).grow(16.0))
+	if missile_button:
+		rocket.no_steer_rects.append(Rect2(missile_button.position, Vector2(128, 128)).grow(16.0))
 
 
 ## Cockpit console instruments: master caution, boost fuel, hull integrity, nav beacon.
@@ -632,7 +799,10 @@ func _update_dashboard() -> void:
 		_set_fill(boost_bar, color)
 		_set_label(fuel_label, ("FUEL LOW" if low_fuel else "BOOST FUEL") + ("" if touch_ui else "  [Shift]"), Color(1, 0.75, 0.35))
 
-	# Hull integrity: green -> yellow -> red, flashing when critical.
+	# Hull integrity: green -> yellow -> red, flashing when critical. The bar's full length
+	# is the max hull (150% with the Reinforced Hull mod).
+	if not is_equal_approx(hull_bar.max_value, hull_max):
+		hull_bar.max_value = hull_max
 	if not is_equal_approx(hull_bar.value, hull):
 		hull_bar.value = hull
 	var hull_color := Color(0.3, 0.9, 0.45) if hull > 0.6 else (Color(1.0, 0.8, 0.2) if hull > 0.3 else Color(1.0, 0.3, 0.25))
@@ -749,18 +919,407 @@ func _spawn_station() -> void:
 	_show_toast("STATION IN VISUAL RANGE!", Color(0.45, 1, 0.6))
 
 
-## Docking at the station: repairs 25% hull and refills the booster (if you still have it).
+# --- Docking & ship mods -------------------------------------------------------
+
+## Reaching a station: the ship comes to a full stop and docks. The world freezes while
+## the station menu is open: choose fuel OR hull repair, then pick one of 2 random mods.
 func _on_station_reached(station: Area2D) -> void:
-	if station.used:
+	if station.used or state != State.PLAYING:
 		return
 	station.used = true
 	station_docked = true
-	var repaired := minf(1.0 - hull, STATION_REPAIR)
-	hull += repaired
-	var parts: Array[String] = []
-	parts.append("HULL +%d%%" % roundi(repaired * 100.0) if repaired > 0.0 else "HULL OK")
-	parts.append("FUEL FULL" if rocket.refuel() else "NO BOOSTER")
-	_show_toast("DOCKED:  " + "   ".join(parts), Color(0.45, 1, 0.6))
+	_dock_station = station
+	state = State.DOCKED
+
+	# Full stop: forward flight, stars and asteroids all freeze.
+	forward_speed = 0.0
+	Obstacle.world_speed = 0.0
+	obstacles.process_mode = Node.PROCESS_MODE_DISABLED
+	rocket.active = false
+	rocket.boost_button_held = false
+	rocket.velocity_x = 0.0
+	rocket.flame_power = 0.35
+	boost_button.visible = false
+	missile_button.visible = false
+	missiles.clear()
+
+	# Missile Pod reloads automatically at every station.
+	var reloaded := mods.has("missile") and missile_ammo < ModInfo.MISSILE_AMMO
+	if mods.has("missile"):
+		missile_ammo = ModInfo.MISSILE_AMMO
+	_show_toast("DOCKED" + ("  ·  MISSILES RELOADED" if reloaded else ""), Color(0.45, 1, 0.6))
+
+	# The station glides in under the ship and locks on, then the menu opens.
+	var tween := create_tween()
+	tween.tween_property(station, "position", rocket.position + Vector2(0, 8), 0.6) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_callback(_open_station_service)
+
+
+## Step 1: one service, fuel OR hull repair.
+func _open_station_service() -> void:
+	_dock_step = "service"
+	station_menu.visible = true
+	station_title.text = "DOCKED AT STATION"
+	station_subtitle.text = "Choose ONE service:"
+	_clear_options()
+	var fuel_button := _option_button("", "REFUEL BOOSTER",
+		"Fill the booster tank to 100%%  (now %d%%)." % roundi(rocket.fuel * 100.0) if rocket.has_booster
+		else "Your booster is gone. It can't be refuelled.", Color(1, 0.65, 0.25), _pick_fuel)
+	fuel_button.disabled = not rocket.has_booster
+	var repair_button := _option_button("", "REPAIR HULL",
+		"Repair +%d%% hull  (now %d%% of %d%%)." % [roundi(STATION_REPAIR * 100.0), roundi(hull * 100.0), roundi(hull_max * 100.0)],
+		Color(0.45, 1, 0.6), _pick_repair)
+	station_footer.visible = false
+	(repair_button if fuel_button.disabled else fuel_button).grab_focus()
+
+
+func _pick_fuel() -> void:
+	rocket.refuel()
+	_show_toast("BOOSTER REFUELED", Color(1, 0.75, 0.35))
+	_open_station_mods()
+
+
+func _pick_repair() -> void:
+	hull = minf(hull + STATION_REPAIR, hull_max)
+	_show_toast("HULL REPAIRED", Color(0.45, 1, 0.6))
+	_open_station_mods()
+
+
+## Step 2: the station offers 2 random mods (never ones already fitted). Pick one or skip.
+func _open_station_mods() -> void:
+	_dock_step = "mod"
+	_offer = ModInfo.random_offer(mods)
+	if _offer.is_empty():
+		_undock()
+		return
+	var full := not mods.has("")
+	station_title.text = "SHIP MODIFICATION"
+	station_subtitle.text = "Pick one upgrade. Your ship has 2 mod slots%s." % (
+		" (both are full: you'll choose one to replace)" if full else "")
+	_clear_options()
+	var first: Button = null
+	for id in _offer:
+		var info: Dictionary = ModInfo.MODS[id]
+		var b := _option_button(id, info["name"], info["desc"], info["color"], _pick_mod.bind(id))
+		if first == null:
+			first = b
+	station_footer.text = "Skip"
+	station_footer.visible = true
+	first.grab_focus()
+
+
+func _pick_mod(id: String) -> void:
+	var free_slot := mods.find("")
+	if free_slot != -1:
+		_install_mod(id, free_slot)
+		_undock()
+	else:
+		_pending_mod = id
+		_open_station_replace()
+
+
+## Step 3 (only when both slots are full): choose which fitted mod to swap out.
+func _open_station_replace() -> void:
+	_dock_step = "replace"
+	station_title.text = "BOTH SLOTS FULL"
+	station_subtitle.text = "Replace which mod with %s?" % ModInfo.MODS[_pending_mod]["name"]
+	_clear_options()
+	var first: Button = null
+	for slot in 2:
+		var id := mods[slot]
+		var info: Dictionary = ModInfo.MODS[id]
+		var b := _option_button(id, "Remove " + String(info["name"]), "Slot %d. This mod is removed." % (slot + 1),
+			info["color"], _pick_replace.bind(slot))
+		if first == null:
+			first = b
+	station_footer.text = "Keep current mods"
+	station_footer.visible = true
+	first.grab_focus()
+
+
+func _pick_replace(slot: int) -> void:
+	_install_mod(_pending_mod, slot)
+	_undock()
+
+
+func _on_station_footer() -> void:
+	_undock()
+
+
+func _install_mod(id: String, slot: int) -> void:
+	mods[slot] = id
+	if id == "missile":
+		missile_ammo = ModInfo.MISSILE_AMMO
+	_apply_mods()
+	_show_toast("MOD FITTED: " + String(ModInfo.MODS[id]["name"]).to_upper(), Color(0.45, 0.85, 1))
+
+
+## Recalculate everything the fitted mods change.
+func _apply_mods() -> void:
+	rocket.agility = ModInfo.RCS_AGILITY if mods.has("rcs") else 1.0
+	var new_max := 1.0 + (ModInfo.HULL_BONUS if mods.has("hull") else 0.0)
+	if new_max > hull_max:
+		hull += new_max - hull_max  # fitting the reinforced hull adds the extra plating
+	hull_max = new_max
+	hull = minf(hull, hull_max)
+	if not mods.has("missile"):
+		missile_ammo = 0
+
+
+## Leave the station: flight resumes (speed eases back up) with a moment of protection.
+func _undock() -> void:
+	station_menu.visible = false
+	_dock_step = ""
+	_clear_options()
+	station_footer.release_focus()
+	state = State.PLAYING
+	obstacles.process_mode = Node.PROCESS_MODE_INHERIT
+	rocket.active = true
+	rocket.flame_power = 1.0
+	invulnerable = INVULNERABLE_TIME
+	boost_button.visible = touch_ui
+	missile_button.visible = touch_ui and mods.has("missile")
+	_position_boost_button()
+	_tip_timer = 0.0  # drop the "station in range" alert, move on to the next tip
+
+
+func _clear_options() -> void:
+	for child in station_options.get_children():
+		station_options.remove_child(child)
+		child.queue_free()
+
+
+## A big card-style button: optional mod icon, title and description.
+func _option_button(mod_id: String, title: String, desc: String, color: Color, on_press: Callable) -> Button:
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(240, 176 if mod_id != "" else 110)
+	button.pressed.connect(on_press)
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 12
+	box.offset_top = 10
+	box.offset_right = -12
+	box.offset_bottom = -10
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 4)
+	if mod_id != "":
+		var icon := ModIcon.new()
+		icon.custom_minimum_size = Vector2(46, 46)
+		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		icon.mod_id = mod_id
+		box.add_child(icon)
+	var name_label := Label.new()
+	name_label.text = title
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 18)
+	name_label.add_theme_color_override("font_color", color)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(name_label)
+	var desc_label := Label.new()
+	desc_label.text = desc
+	desc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_label.add_theme_font_size_override("font_size", 13)
+	desc_label.add_theme_color_override("font_color", Color(0.8, 0.84, 0.92))
+	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(desc_label)
+	button.add_child(box)
+	station_options.add_child(button)
+	return button
+
+
+## SHIP MODS panel (left): only rewritten when what it shows actually changes.
+func _update_mod_panel() -> void:
+	var show_panel := state == State.READY or state == State.PLAYING or state == State.DOCKED
+	if mod_panel.visible != show_panel:
+		mod_panel.visible = show_panel
+	if not show_panel:
+		return
+	var key := "%s|%s|%d|%s|%s" % [mods[0], mods[1], missile_ammo, hull >= hull_max, touch_ui]
+	if key == _mod_panel_key:
+		return
+	_mod_panel_key = key
+	for slot in 2:
+		var row: Control = mod_slots[slot]
+		var id := mods[slot]
+		row.get_node("Icon").mod_id = id
+		var name_label: Label = row.get_node("Text/Name")
+		var detail: Label = row.get_node("Text/Detail")
+		if id == "":
+			name_label.text = "Empty slot"
+			name_label.add_theme_color_override("font_color", Color(0.6, 0.63, 0.7))
+			detail.text = "Dock at a station to fit a mod"
+			detail.add_theme_color_override("font_color", Color(0.5, 0.53, 0.6))
+			continue
+		var info: Dictionary = ModInfo.MODS[id]
+		name_label.text = info["name"]
+		name_label.add_theme_color_override("font_color", info["color"])
+		var text := ""
+		var color := Color(0.7, 0.74, 0.82)
+		match id:
+			"thruster": text = "+25% forward speed"
+			"rcs": text = "+35% side-to-side speed"
+			"radar": text = "Scanning ahead"
+			"hull": text = "Max hull 150%"
+			"healing": text = "Hull full" if hull >= hull_max else "Repairing hull…"
+			"missile":
+				if missile_ammo > 0:
+					text = "MISSILES %d/%d%s" % [missile_ammo, ModInfo.MISSILE_AMMO, "" if touch_ui else "  [F]"]
+					color = Color(1, 0.75, 0.6)
+				else:
+					text = "EMPTY · reloads at stations"
+					color = Color(1, 0.45, 0.4)
+		detail.text = text
+		detail.add_theme_color_override("font_color", color)
+
+
+# --- Missile Pod mod -----------------------------------------------------------
+
+func _make_missile_button() -> void:
+	var gradient := Gradient.new()
+	gradient.set_color(0, Color(1.0, 0.35, 0.3, 0.85))
+	gradient.set_color(1, Color(1, 1, 1, 0))
+	gradient.add_point(0.78, Color(0.75, 0.15, 0.12, 0.8))
+	gradient.add_point(0.8, Color(1, 1, 1, 0.9))
+	gradient.add_point(0.9, Color(1, 1, 1, 0.9))
+	gradient.add_point(0.92, Color(1, 1, 1, 0))
+	var texture := GradientTexture2D.new()
+	texture.width = 128
+	texture.height = 128
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(1.0, 0.5)
+	texture.gradient = gradient
+	missile_button = TouchScreenButton.new()
+	missile_button.texture_normal = texture
+	var shape := CircleShape2D.new()
+	shape.radius = 64.0
+	missile_button.shape = shape
+	missile_button.shape_centered = true
+	missile_button.pressed.connect(func() -> void:
+		if state == State.PLAYING:
+			_fire_missile())
+	var label := Label.new()
+	label.text = "MISSILE"
+	label.size = Vector2(128, 128)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 22)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	missile_button.add_child(label)
+	missile_button.visible = false
+	$UI.add_child(missile_button)
+
+
+func _fire_missile() -> void:
+	if not mods.has("missile"):
+		return
+	if missile_ammo <= 0:
+		_show_toast("NO MISSILES  ·  RELOAD AT A STATION", Color(1, 0.5, 0.4))
+		return
+	if missile_cooldown > 0.0:
+		return
+	var target := _nearest_asteroid()
+	if target == null:
+		_show_toast("NO TARGET IN RANGE", Color(0.75, 0.78, 0.85))
+		return
+	missile_ammo -= 1
+	missile_cooldown = ModInfo.MISSILE_COOLDOWN
+	missiles.append({
+		"pos": rocket.position + Vector2(0, -30),
+		"vel": Vector2(rocket.velocity_x * 0.3, -520),
+		"target": target,
+		"age": 0.0,
+	})
+
+
+## Closest asteroid that's on screen and ahead of the ship.
+func _nearest_asteroid() -> Area2D:
+	var best: Area2D = null
+	var best_dist := INF
+	for child in obstacles.get_children():
+		if child.get_script() != Obstacle or child.is_queued_for_deletion():
+			continue
+		if child.position.y < 0.0 or child.position.y > rocket.position.y - 20.0:
+			continue
+		var d: float = child.position.distance_squared_to(rocket.position)
+		if d < best_dist:
+			best_dist = d
+			best = child
+	return best
+
+
+func _update_missiles(delta: float) -> void:
+	for i in range(missiles.size() - 1, -1, -1):
+		var m := missiles[i]
+		m["age"] += delta
+		var target = m["target"]
+		if not is_instance_valid(target) or target.is_queued_for_deletion():
+			target = _nearest_asteroid()
+			m["target"] = target
+		var pos: Vector2 = m["pos"]
+		var vel: Vector2 = m["vel"]
+		# Homing: steer the velocity toward the target, accelerating to full speed.
+		var desired := Vector2(0, -1100)
+		if target:
+			desired = (target.position - pos).normalized() * 1100.0
+		vel = vel.lerp(desired, clampf(7.0 * delta, 0.0, 1.0))
+		pos += vel * delta
+		m["pos"] = pos
+		m["vel"] = vel
+		var trail: PackedVector2Array = m.get("trail", PackedVector2Array())
+		trail.append(pos)
+		if trail.size() > 10:
+			trail.remove_at(0)
+		m["trail"] = trail
+		if target and pos.distance_to(target.position) < target.radius:
+			_shatter(target)
+			target.queue_free()
+			score += ModInfo.MISSILE_SCORE
+			_show_toast("TARGET DESTROYED  +%d" % int(ModInfo.MISSILE_SCORE), Color(1, 0.75, 0.4))
+			missiles.remove_at(i)
+		elif m["age"] > 3.0 or pos.y < -120.0:
+			missiles.remove_at(i)
+
+
+# --- Radar mod -----------------------------------------------------------------
+
+func _make_radar_overlay() -> void:
+	radar_overlay = Control.new()
+	radar_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	radar_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	radar_overlay.draw.connect(_draw_radar)
+	$UI/Root.add_child(radar_overlay)
+	$UI/Root.move_child(radar_overlay, cockpit.get_index() + 1)  # just above the cockpit frame
+
+
+func _update_radar() -> void:
+	var on := mods.has("radar") and (state == State.PLAYING or state == State.DOCKED)
+	if on or _radar_had_blips:
+		radar_overlay.queue_redraw()
+	_radar_had_blips = on
+
+
+## Radar blips along the top of the window for asteroids that haven't come into view yet.
+func _draw_radar() -> void:
+	if not mods.has("radar") or not (state == State.PLAYING or state == State.DOCKED):
+		return
+	var top := 50.0 + 8.0  # just under the cockpit's top bar
+	for child in obstacles.get_children():
+		if child.get_script() != Obstacle:
+			continue
+		var y: float = child.position.y
+		if y > 50.0:
+			continue  # already visible
+		var closeness := clampf(1.0 - (50.0 - y) / (ModInfo.RADAR_RANGE + 80.0), 0.15, 1.0)
+		var color := Color(1, 0.55, 0.15) if child.tricky else Color(1, 0.3, 0.25)
+		var x: float = child.position.x
+		var w: float = clampf(child.radius * 0.5, 7.0, 16.0)
+		radar_overlay.draw_colored_polygon(PackedVector2Array([
+			Vector2(x - w, top), Vector2(x + w, top), Vector2(x, top + w * 1.2)]), Color(color, closeness))
+		radar_overlay.draw_rect(Rect2(x - w, top - 3, w * 2.0, 2), Color(color, closeness * 0.6))
 
 
 func _show_toast(text: String, color: Color) -> void:
@@ -794,6 +1353,7 @@ func _on_fullscreen_toggled(on: bool) -> void:
 
 func _on_reset_pressed() -> void:
 	best_score = 0.0
+	local_runs.clear()
 	_save()
 	reset_button.text = "Best Score Reset!"
 	await get_tree().create_timer(1.2).timeout
@@ -812,12 +1372,16 @@ func _load_save() -> void:
 	var diff = cfg.get_value("settings", "difficulty", Difficulty.NORMAL)
 	if diff is int and DIFFICULTY_TUNING.has(diff):
 		difficulty = diff
+	var runs = cfg.get_value("score", "runs", [])
+	if runs is Array:
+		local_runs = runs.filter(func(r) -> bool: return r is Dictionary and r.has("score"))
 
 
 func _save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("score", "best", best_score)
 	cfg.set_value("settings", "difficulty", difficulty)
+	cfg.set_value("score", "runs", local_runs)
 	cfg.save(SAVE_PATH)
 
 
@@ -832,7 +1396,9 @@ func _spawn_obstacle() -> void:
 	var speed := start_fall_speed + (level - 1) * 40.0 + level_time * 2.0 + randf_range(0.0, 140.0)
 	rock.fall_speed = speed * tuning[1]
 	rock.spin = randf_range(-2.0, 2.0)
-	rock.position = Vector2(randf_range(radius, size.x - radius), -radius)
+	# Spawned a little above the window so the Radar mod can see them coming. (Without
+	# radar this just means they arrive a moment later - nothing else changes.)
+	rock.position = Vector2(randf_range(radius, size.x - radius), -radius - ModInfo.RADAR_RANGE)
 	# Asteroids take on the colour of the planet you're passing.
 	rock.setup(radius, _planet(level)["rock"])
 	_make_tricky(rock)
@@ -946,7 +1512,7 @@ func _update_background() -> void:
 		layer.speed_scale = boost
 
 	# The planet for the current level drifts slowly down past the rocket.
-	var show_planet := state == State.PLAYING or state == State.OVER
+	var show_planet := state == State.PLAYING or state == State.DOCKED or state == State.OVER
 	planet_node.visible = show_planet
 	if show_planet:
 		var planet := _planet(level)
@@ -1044,6 +1610,7 @@ func _hull_breach() -> void:
 	Obstacle.world_speed = 1.0
 	game_over_title.text = "HULL BREACH!"
 	boost_button.visible = false
+	missile_button.visible = false
 	rocket.boost_button_held = false
 	rocket.active = false
 	rocket.modulate = Color(1.0, 0.4, 0.3)
@@ -1052,7 +1619,8 @@ func _hull_breach() -> void:
 	var new_best := score > best_score
 	if new_best:
 		best_score = score
-		_save()
+	_record_run()
+	_save()
 
 	result_label.text = "Score: %d\nReached Level %d · %s\n%s" % [
 		int(score), level, _planet(level)["name"],
@@ -1101,6 +1669,20 @@ func _draw() -> void:
 	for pod in pods:
 		draw_set_transform(pod["pos"], pod["rot"])
 		Rocket.draw_pod(self, Vector2.ZERO)
+	draw_set_transform(Vector2.ZERO)
+
+	# Homing missiles: fading exhaust trail, then the missile pointing where it's flying.
+	for m in missiles:
+		var trail: PackedVector2Array = m.get("trail", PackedVector2Array())
+		if trail.size() >= 2:
+			draw_polyline(trail, Color(1, 0.7, 0.35, 0.45), 3.0)
+		var vel: Vector2 = m["vel"]
+		draw_set_transform(m["pos"], vel.angle() + PI / 2.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(-3, 10), Vector2(3, 10), Vector2(0, 19 + randf() * 6)]), Color(1, 0.7, 0.25))
+		draw_rect(Rect2(-3, -8, 6, 18), Color(0.92, 0.93, 0.96))
+		draw_colored_polygon(PackedVector2Array([Vector2(-3, -8), Vector2(3, -8), Vector2(0, -15)]), Color(1, 0.35, 0.3))
+		draw_colored_polygon(PackedVector2Array([Vector2(-3, 4), Vector2(-7, 11), Vector2(-3, 10)]), Color(0.8, 0.25, 0.22))
+		draw_colored_polygon(PackedVector2Array([Vector2(3, 4), Vector2(7, 11), Vector2(3, 10)]), Color(0.8, 0.25, 0.22))
 	draw_set_transform(Vector2.ZERO)
 
 
