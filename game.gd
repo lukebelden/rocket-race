@@ -12,6 +12,7 @@ const ModIcon := preload("res://mod_icon.gd")
 const Rivals := preload("res://rivals.gd")
 const ProfileUI := preload("res://profile_ui.gd")
 const Animals := preload("res://animals.gd")
+const PauseInput := preload("res://pause_input.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -70,6 +71,11 @@ const SPACE_DARK := Color(0.03, 0.03, 0.08)
 ## Saved to disk (user://save.cfg), so they survive closing the game/page.
 static var best_score: float = 0.0
 static var difficulty: Difficulty = Difficulty.NORMAL
+## Settings: volumes 0..1 for the Master / Music / Effects buses, and ship computer tips.
+static var vol_master: float = 0.8
+static var vol_music: float = 0.6
+static var vol_sfx: float = 0.8
+static var tips_enabled: bool = true
 ## Your best runs on this device: [{score, level, date}], best first. Saved to disk.
 static var local_runs: Array = []
 ## Set by "Play Again" so the reloaded scene skips the menu.
@@ -106,6 +112,12 @@ var _mp_code_edit: LineEdit
 var _mp_buttons: Array[Button] = []
 var _send_timer: float = 0.0
 var _shown_place: int = -1
+# Pause menu (single player only)
+var pause_screen: Control
+var pause_button: Button
+var _settings_from_pause := false
+var _was_boosting := false
+var _last_count := -1
 # Accounts / hangar / shop (profile.gd, profile_ui.gd)
 var profile_ui: Node
 var profile_label: Label
@@ -287,7 +299,9 @@ func _ready() -> void:
 	fullscreen_check.button_pressed = _is_fullscreen()
 	fullscreen_check.toggled.connect(_on_fullscreen_toggled)
 	reset_button.pressed.connect(_on_reset_pressed)
-	back_button.pressed.connect(_show_menu)
+	back_button.pressed.connect(_on_settings_back)
+	_make_settings_extras()
+	_make_pause_menu()
 
 	# Game over
 	play_again_button.pressed.connect(_on_play_again)
@@ -358,6 +372,9 @@ func _process(delta: float) -> void:
 			_update_playing(delta)
 
 	_update_tips(delta)
+	var show_pause := _can_pause()
+	if pause_button.visible != show_pause:
+		pause_button.visible = show_pause
 	if race_mode:
 		_update_race(delta)
 
@@ -543,6 +560,7 @@ func _go_to_pad() -> void:
 ## Liftoff: play the launch intro, then the game begins.
 func _launch() -> void:
 	state = State.INTRO
+	Sound.play("launch")
 	intro_time = 0.0
 	launch_prompt.visible = false
 	menu.visible = false
@@ -652,6 +670,9 @@ func _update_playing(delta: float) -> void:
 	var cruise := ModInfo.THRUSTER_SPEED if mods.has("thruster") else 1.0
 	var target_speed := cruise * (FORWARD_BOOST if rocket.boosting else 1.0)
 	forward_speed = move_toward(forward_speed, target_speed, FORWARD_EASE * delta)
+	if rocket.boosting and not _was_boosting:
+		Sound.play("boost")
+	_was_boosting = rocket.boosting
 	Obstacle.world_speed = forward_speed
 	var travelled := delta * forward_speed
 
@@ -692,6 +713,7 @@ func _tuning() -> Array:
 
 
 func _show_level_banner() -> void:
+	Sound.play("level")
 	level_banner.text = "LEVEL %d\n%s" % [level, String(_planet(level)["name"]).to_upper()]
 	if race_mode and level == RACE_LEVELS:
 		level_banner.text += "\nFINAL STRETCH!"
@@ -772,7 +794,7 @@ func _once(key: String, text: String) -> String:
 
 
 func _update_tips(delta: float) -> void:
-	var active := state == State.READY or state == State.PLAYING
+	var active := (state == State.READY or state == State.PLAYING) and tips_enabled
 	if tip_panel.visible != active:
 		tip_panel.visible = active
 	if not active:
@@ -1042,6 +1064,7 @@ func _on_station_reached(station: Area2D) -> void:
 	station_docked = true
 	_dock_station = station
 	state = State.DOCKED
+	Sound.play("dock")
 
 	# Full stop: forward flight, stars and asteroids all freeze.
 	forward_speed = 0.0
@@ -1342,6 +1365,7 @@ func _fire_missile() -> void:
 		_show_toast("NO TARGET IN RANGE", Color(0.75, 0.78, 0.85))
 		return
 	missile_ammo -= 1
+	Sound.play("missile")
 	missile_cooldown = ModInfo.MISSILE_COOLDOWN
 	missiles.append({
 		"pos": rocket.position + Vector2(0, -30),
@@ -1392,6 +1416,7 @@ func _update_missiles(delta: float) -> void:
 		m["trail"] = trail
 		if target and pos.distance_to(target.position) < target.radius:
 			_shatter(target)
+			Sound.play("impact", 1.5, -6.0)
 			target.queue_free()
 			score += ModInfo.MISSILE_SCORE
 			_show_toast("TARGET DESTROYED  +%d" % int(ModInfo.MISSILE_SCORE), Color(1, 0.75, 0.4))
@@ -1488,6 +1513,10 @@ func _load_save() -> void:
 	var diff = cfg.get_value("settings", "difficulty", Difficulty.NORMAL)
 	if diff is int and DIFFICULTY_TUNING.has(diff):
 		difficulty = diff
+	vol_master = clampf(float(cfg.get_value("settings", "vol_master", vol_master)), 0.0, 1.0)
+	vol_music = clampf(float(cfg.get_value("settings", "vol_music", vol_music)), 0.0, 1.0)
+	vol_sfx = clampf(float(cfg.get_value("settings", "vol_sfx", vol_sfx)), 0.0, 1.0)
+	tips_enabled = bool(cfg.get_value("settings", "tips", tips_enabled))
 	var runs = cfg.get_value("score", "runs", [])
 	if runs is Array:
 		local_runs = runs.filter(func(r) -> bool: return r is Dictionary and r.has("score"))
@@ -1501,6 +1530,10 @@ func _save() -> void:
 	cfg.set_value("multiplayer", "name", player_name)
 	cfg.set_value("score", "best", best_score)
 	cfg.set_value("settings", "difficulty", difficulty)
+	cfg.set_value("settings", "vol_master", vol_master)
+	cfg.set_value("settings", "vol_music", vol_music)
+	cfg.set_value("settings", "vol_sfx", vol_sfx)
+	cfg.set_value("settings", "tips", tips_enabled)
 	cfg.set_value("score", "runs", local_runs)
 	cfg.save(SAVE_PATH)
 
@@ -1721,6 +1754,7 @@ func _on_rocket_hit(area: Area2D) -> void:
 	shake = 0.35
 	if hull > 0.0:
 		invulnerable = INVULNERABLE_TIME
+		Sound.play("impact")
 		_show_toast("IMPACT!  HULL -%d%%" % roundi(damage * 100.0), Color(1, 0.45, 0.35))
 		return
 	_hull_breach()
@@ -1729,6 +1763,7 @@ func _on_rocket_hit(area: Area2D) -> void:
 ## Hull reached 0%: game over.
 func _hull_breach() -> void:
 	state = State.OVER
+	Sound.play("explosion")
 	forward_speed = 1.0
 	Obstacle.world_speed = 1.0
 	game_over_title.text = "HULL BREACH!"
@@ -1788,6 +1823,9 @@ func _begin_race(info: Dictionary) -> void:
 
 func _update_race_countdown(_delta: float) -> void:
 	var race_countdown := (race_launch_at - Time.get_ticks_msec()) / 1000.0
+	if ceili(race_countdown) != _last_count:
+		_last_count = ceili(race_countdown)
+		Sound.play("go" if _last_count <= 0 else "beep")
 	if race_countdown <= 0.0:
 		_launch()
 		return
@@ -2203,11 +2241,20 @@ func _make_profile_ui() -> void:
 		b.pressed.connect(_open_profile_page.bind(spec[1]))
 		pair.add_child(b)
 	multiplayer_button.add_sibling(pair)
+	# Scoreboard + Settings share a row too, so the menu fits short (landscape) screens.
+	var pair2 := HBoxContainer.new()
+	pair2.add_theme_constant_override("separation", 8)
+	scoreboard_button.add_sibling(pair2)
+	for b in [scoreboard_button, settings_button]:
+		b.get_parent().remove_child(b)
+		b.custom_minimum_size = Vector2(146, 46)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pair2.add_child(b)
 	account_button = Button.new()
 	account_button.custom_minimum_size = start_button.custom_minimum_size
 	account_button.add_theme_font_size_override("font_size", 22)
 	account_button.pressed.connect(_open_profile_page.bind("account"))
-	settings_button.add_sibling(account_button)
+	pair2.add_sibling(account_button)
 	_update_profile_line()
 
 	# Once per launch, check the saved login is still valid and pick up the latest progress.
@@ -2282,12 +2329,14 @@ func _give_run_reward() -> void:
 	var reward: Dictionary = await Profile.report_run(int(score), level)
 	if reward.is_empty() or not is_instance_valid(result_label) or state != State.OVER:
 		return
+	Sound.play("levelup" if int(reward.get("level_after", 1)) > int(reward.get("level_before", 1)) else "coin")
 	result_label.text += "\n\n" + _reward_text(reward)
 
 
 ## Race rewards arrive from the server right after the results.
 func _on_profile_rewarded(reward: Dictionary) -> void:
 	if race_mode and state == State.OVER and str(reward.get("track", "")) == "mp":
+		Sound.play("levelup" if int(reward.get("level_after", 1)) > int(reward.get("level_before", 1)) else "coin")
 		result_label.text += "\n\n" + _reward_text(reward)
 
 
@@ -2302,6 +2351,180 @@ func _reward_text(reward: Dictionary) -> String:
 		if before < shop and after >= shop:
 			text += "  ·  Shop unlocked!"
 	return text
+
+
+# --- Pause menu (single player) and extra settings ------------------------------------
+
+## Pausing is single player only: in a race everyone keeps flying.
+func _can_pause() -> bool:
+	return not race_mode and (state == State.INTRO or state == State.PLAYING) and not get_tree().paused
+
+
+func _make_pause_menu() -> void:
+	var keys := PauseInput.new()
+	add_child(keys)
+	keys.toggle.connect(func() -> void:
+		if get_tree().paused and pause_screen.visible:
+			_resume()
+		elif get_tree().paused and settings.visible and _settings_from_pause:
+			_on_settings_back()
+		elif _can_pause():
+			_pause())
+
+	# Same frame as the Settings screen.
+	pause_screen = settings.duplicate(0)
+	pause_screen.name = "Pause"
+	pause_screen.visible = false
+	pause_screen.process_mode = Node.PROCESS_MODE_ALWAYS
+	settings.add_sibling(pause_screen)
+	var vbox: VBoxContainer = pause_screen.get_node("Panel/VBox")
+	for child in vbox.get_children():
+		vbox.remove_child(child)
+		child.free()
+	var title := Label.new()
+	title.text = "PAUSED"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 44)
+	title.add_theme_color_override("font_color", Color(1, 0.75, 0.35))
+	vbox.add_child(title)
+	var specs := [
+		["Resume", _resume],
+		["Settings", _open_settings_from_pause],
+		["Restart Run", func() -> void:
+			get_tree().paused = false
+			skip_menu = true
+			get_tree().reload_current_scene()],
+		["Quit to Menu", func() -> void:
+			get_tree().paused = false
+			get_tree().reload_current_scene()],
+	]
+	for spec in specs:
+		var b := Button.new()
+		b.text = spec[0]
+		b.custom_minimum_size = Vector2(300, 50)
+		b.add_theme_font_size_override("font_size", 24)
+		b.pressed.connect(spec[1])
+		vbox.add_child(b)
+	var note := Label.new()
+	note.text = "Restarting or quitting ends this run without XP or credits."
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.add_theme_font_size_override("font_size", 13)
+	note.add_theme_color_override("font_color", Color(0.6, 0.64, 0.72))
+	vbox.add_child(note)
+	# Settings must keep working while the game is paused.
+	settings.process_mode = Node.PROCESS_MODE_ALWAYS
+
+	# On-screen pause button (top right, under the level name) for mouse and touch players.
+	pause_button = Button.new()
+	pause_button.text = "II"
+	pause_button.tooltip_text = "Pause (Esc / P)"
+	pause_button.add_theme_font_size_override("font_size", 20)
+	pause_button.focus_mode = Control.FOCUS_NONE
+	pause_button.anchor_left = 1.0
+	pause_button.anchor_right = 1.0
+	pause_button.offset_left = -78.0
+	pause_button.offset_right = -30.0
+	pause_button.offset_top = 52.0
+	pause_button.offset_bottom = 96.0
+	pause_button.visible = false
+	pause_button.pressed.connect(func() -> void:
+		if _can_pause():
+			_pause())
+	$UI/Root.add_child(pause_button)
+
+
+func _pause() -> void:
+	get_tree().paused = true
+	rocket.boost_button_held = false
+	pause_screen.visible = true
+	pause_button.visible = false
+	Sound.play("pause")
+	(pause_screen.get_node("Panel/VBox").get_child(1) as Button).grab_focus()
+
+
+func _resume() -> void:
+	pause_screen.visible = false
+	settings.visible = false
+	_settings_from_pause = false
+	get_tree().paused = false
+
+
+func _open_settings_from_pause() -> void:
+	_settings_from_pause = true
+	pause_screen.visible = false
+	settings.visible = true
+	back_button.grab_focus()
+
+
+func _on_settings_back() -> void:
+	if _settings_from_pause and get_tree().paused:
+		_settings_from_pause = false
+		settings.visible = false
+		pause_screen.visible = true
+		(pause_screen.get_node("Panel/VBox").get_child(1) as Button).grab_focus()
+	else:
+		_show_menu()
+
+
+## Tabbing away (or switching browser tabs) mid-run pauses single player automatically.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and pause_screen and _can_pause():
+		_pause()
+
+
+## Settings screen: volume sliders and the tips switch, added above Reset / Back.
+func _make_settings_extras() -> void:
+	var vbox := reset_button.get_parent()
+	vbox.add_theme_constant_override("separation", 8)  # more rows now: keep it on screen
+	for spec in [["Master volume", "Master"], ["Music", "Music"], ["Sound effects", "Effects"]]:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 16)
+		var label := Label.new()
+		label.text = spec[0]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var slider := HSlider.new()
+		slider.custom_minimum_size = Vector2(170, 40)
+		slider.min_value = 0.0
+		slider.max_value = 1.0
+		slider.step = 0.05
+		slider.value = _volume(spec[1])
+		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var bus: String = spec[1]
+		slider.value_changed.connect(func(v: float) -> void:
+			_set_volume(bus, v)
+			if bus != "Music":
+				Sound.play("beep", 1.0, -8.0))  # hear the new level
+		slider.drag_ended.connect(func(_changed: bool) -> void: _save())
+		row.add_child(slider)
+		vbox.add_child(row)
+		vbox.move_child(row, reset_button.get_index())
+	var tips := CheckButton.new()
+	tips.text = "Ship computer tips"
+	tips.custom_minimum_size = Vector2(300, 56)
+	tips.button_pressed = tips_enabled
+	tips.toggled.connect(func(on: bool) -> void:
+		tips_enabled = on
+		_save())
+	vbox.add_child(tips)
+	vbox.move_child(tips, reset_button.get_index())
+	for bus in ["Master", "Music", "Effects"]:
+		Sound.set_volume(bus, _volume(bus))
+
+
+func _volume(bus: String) -> float:
+	match bus:
+		"Music": return vol_music
+		"Effects": return vol_sfx
+	return vol_master
+
+
+func _set_volume(bus: String, v: float) -> void:
+	match bus:
+		"Music": vol_music = v
+		"Effects": vol_sfx = v
+		_: vol_master = v
+	Sound.set_volume(bus, v)
 
 
 # --- Drawing -----------------------------------------------------------------
