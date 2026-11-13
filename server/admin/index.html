@@ -23,10 +23,15 @@
   <!-- Tickets -->
   <div id="app" hidden>
     <header class="topbar">
-      <h1>Rocket Race <span>Tickets</span></h1>
+      <h1>Rocket Race <span>Admin</span></h1>
+      <nav class="views" aria-label="Section">
+        <button id="nav-tickets" class="tab" aria-pressed="true">Tickets</button>
+        <button id="nav-players" class="tab" aria-pressed="false">Players</button>
+      </nav>
       <div class="who"><span id="who"></span><button id="logout" class="ghost">Log out</button></div>
     </header>
 
+    <div id="tickets-view">
     <nav class="tabs" id="status-tabs" aria-label="Ticket status"></nav>
 
     <div class="filters">
@@ -50,6 +55,20 @@
       <section id="detail" class="detail" aria-label="Ticket details">
         <p class="muted placeholder">Pick a ticket to see it here.</p>
       </section>
+    </div>
+    </div>
+
+    <div id="players-view" hidden>
+      <div class="filters">
+        <input id="player-search" type="search" placeholder="Search username or email" aria-label="Search players">
+      </div>
+      <div class="layout">
+        <section class="list" aria-label="Players"><ul id="players"></ul>
+          <p id="players-empty" class="muted empty" hidden>No players found.</p></section>
+        <section id="player-detail" class="detail" aria-label="Player details">
+          <p class="muted placeholder">Pick a player to see and edit their account.</p>
+        </section>
+      </div>
     </div>
   </div>
 

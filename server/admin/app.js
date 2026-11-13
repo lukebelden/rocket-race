@@ -135,7 +135,8 @@ function personCard(title, p) {
   const dl = el("dl");
   for (const [k, v] of rows) dl.append(el("dt", { text: k }), el("dd", { text: v }));
   return el("div", { class: "person" }, el("h3", { text: title }),
-    el("span", { class: "name", text: p.username + (p.admin ? " (admin)" : "") }), dl);
+    el("span", { class: "name", text: p.username + (p.admin ? " (admin)" : "") }), dl,
+    el("button", { class: "ghost open-player", text: "Open player", onclick: () => openPlayer(p.username) }));
 }
 
 async function openTicket(id) {
@@ -186,6 +187,111 @@ function renderTicket(t) {
     el("div", { class: "people" }, personCard("Reported by", t.reporter),
       t.target ? personCard("Reported player", t.target_account) : null),
     el("p", { class: "section-title", text: "Notes" }), notes, form);
+}
+
+// --- Players: search, view and edit accounts ----------------------------------------------
+
+const MODES = [["sp", "Single Player"], ["mp", "Multiplayer"]];
+const KIND_NAMES = { ships: "Ships", mods: "Mods", designs: "Paint" };
+let currentPlayer = "";
+
+function showView(name) {
+  $("tickets-view").hidden = name !== "tickets";
+  $("players-view").hidden = name !== "players";
+  $("nav-tickets").setAttribute("aria-pressed", String(name === "tickets"));
+  $("nav-players").setAttribute("aria-pressed", String(name === "players"));
+  if (name === "players") loadPlayers();
+}
+$("nav-tickets").addEventListener("click", () => showView("tickets"));
+$("nav-players").addEventListener("click", () => showView("players"));
+
+async function loadPlayers() {
+  let data;
+  try {
+    data = await api("GET", "/api/admin/players?" + new URLSearchParams({ q: $("player-search").value.trim() }));
+  } catch {
+    return;
+  }
+  $("players").replaceChildren(...data.rows.map((p) => el("li", {},
+    el("button", { class: "row", "aria-current": String(p.username === currentPlayer), onclick: () => openPlayer(p.username) },
+      el("span", { class: "row-top" }, el("span", { class: "id", text: p.username + (p.admin ? " (admin)" : "") }),
+        el("span", { class: "when muted", text: "joined " + ago(p.created_at) })),
+      el("span", { class: "row-bottom muted" },
+        el("span", { text: `SP Lvl ${p.sp_level} · ${p.sp_credits} cr   ·   MP Lvl ${p.mp_level} · ${p.mp_credits} cr` }))))));
+  $("players-empty").hidden = data.rows.length > 0;
+}
+let playerTimer = 0;
+$("player-search").addEventListener("input", () => {
+  clearTimeout(playerTimer);
+  playerTimer = setTimeout(loadPlayers, 250);
+});
+
+async function openPlayer(name) {
+  showView("players");
+  currentPlayer = name;
+  try {
+    renderPlayer(await api("GET", "/api/admin/players/" + encodeURIComponent(name)));
+  } catch (err) {
+    $("player-detail").replaceChildren(el("p", { class: "error", text: err.message }));
+  }
+  loadPlayers();
+  if (window.matchMedia("(max-width: 760px)").matches) $("player-detail").scrollIntoView({ behavior: "smooth" });
+}
+
+function renderPlayer(p, message = "", isError = false) {
+  const status = el("p", { class: isError ? "error" : "ok", text: message });
+  const send = async (path, body, done) => {
+    try {
+      renderPlayer(await api("POST", `/api/admin/players/${encodeURIComponent(p.username)}/${path}`, body), done);
+      loadPlayers();
+    } catch (err) {
+      status.className = "error";
+      status.textContent = err.message;
+    }
+  };
+
+  const modeCard = (track, title) => {
+    const t = p[track];
+    const lvl = p[track + "_level"];
+    const xp = el("input", { type: "number", step: "100", placeholder: "e.g. 1000 or -500", "aria-label": title + " XP" });
+    const cr = el("input", { type: "number", step: "50", placeholder: "e.g. 500 or -200", "aria-label": title + " credits" });
+    const form = el("form", { class: "adjust", onsubmit: (e) => {
+      e.preventDefault();
+      send("adjust", { track, xp: Number(xp.value) || 0, credits: Number(cr.value) || 0 }, `${title} updated.`);
+    } }, el("label", {}, "XP (+/-)", xp), el("label", {}, "Credits (+/-)", cr),
+      el("button", { class: "primary", type: "submit", text: "Apply" }));
+    const groups = Object.entries(KIND_NAMES).map(([kind, label]) => el("div", { class: "item-group" },
+      el("span", { text: label }),
+      el("div", { class: "items" }, ...p.catalog[kind].map((id) => {
+        const owned = t.owned[kind].includes(id);
+        const starter = id === "small" || id === "classic";
+        return el("button", {
+          class: "item", "aria-pressed": String(owned), text: id,
+          title: starter ? "Starter item" : (owned ? "Click to remove" : "Click to unlock"),
+          onclick: () => { if (!starter) send("item", { track, kind, id, owned: !owned }, `${title}: ${owned ? "removed" : "unlocked"} ${id}.`); },
+        });
+      }))));
+    return el("div", { class: "mode-card" }, el("h3", { text: title }),
+      el("div", { class: "nums" },
+        el("span", { class: "muted" }, el("b", { text: "Lvl " + lvl.level }), lvl.need ? `${lvl.into} / ${lvl.need} XP` : "MAX"),
+        el("span", { class: "muted" }, el("b", { text: String(t.credits) }), "credits"),
+        el("span", { class: "muted" }, el("b", { text: String(t.xp) }), "total XP")),
+      form, ...groups);
+  };
+
+  const st = p.stats;
+  const history = el("ul", { class: "history" }, ...(p.history.length ? p.history.map((h) =>
+    el("li", {}, new Date(h.created_at).toLocaleString() + " · ", el("b", { text: h.admin }), ": " + h.action))
+    : [el("li", { text: "No admin changes yet." })]));
+
+  $("player-detail").replaceChildren(
+    el("h2", { text: p.username + (p.admin ? " (admin)" : "") }),
+    el("div", { class: "meta" }, el("span", { text: p.email || "no email" }), el("span", { text: "· pilot: " + p.character }),
+      el("span", { text: "· joined " + new Date(p.created_at).toLocaleDateString() })),
+    el("p", { class: "muted", text: `Runs ${st.sp_runs} · best ${st.sp_best}   ·   Races ${st.mp_races} · wins ${st.mp_wins} · best race ${st.mp_best}` }),
+    status,
+    el("div", { class: "mode-grid" }, ...MODES.map(([track, title]) => modeCard(track, title))),
+    el("p", { class: "section-title", text: "Change history" }), history);
 }
 
 // --- Start -------------------------------------------------------------------------------

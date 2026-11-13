@@ -156,7 +156,8 @@ function signup(username, password, email, guestProfile) {
   if (bad) return { error: bad };
   if (db.prepare("SELECT 1 FROM users WHERE username = ?").get(username)) return { error: "That username is taken." };
   // A guest who signs up keeps their single-player progress (guests can't play multiplayer).
-  const profile = progress.sanitize(guestProfile, { allowMp: false });
+  // checkLevels: a guest can't bring items above their level (stored accounts keep admin grants).
+  const profile = progress.sanitize(guestProfile, { allowMp: false, checkLevels: true });
   const salt = crypto.randomBytes(16).toString("hex");
   const info = db
     .prepare("INSERT INTO users (username, email, pass_hash, salt, profile, created_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -439,6 +440,101 @@ function adminLogout(token) {
   db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha(token || ""));
 }
 
+// --- Player management (admin page) ------------------------------------------------------
+
+db.exec(`CREATE TABLE IF NOT EXISTS admin_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  admin TEXT NOT NULL,
+  target TEXT NOT NULL,
+  action TEXT NOT NULL
+)`);
+
+function logAdmin(admin, target, action) {
+  db.prepare("INSERT INTO admin_log (created_at, admin, target, action) VALUES (?, ?, ?, ?)").run(Date.now(), admin, target, action);
+}
+
+function searchPlayers(q = "", limit = 50) {
+  const like = "%" + String(q).slice(0, 60) + "%";
+  return db.prepare(`SELECT username, email, created_at, is_admin, profile FROM users
+      WHERE username LIKE ? OR email LIKE ? ORDER BY username COLLATE NOCASE LIMIT ?`)
+    .all(like, like, limit)
+    .map((u) => {
+      const p = loadProfile(u);
+      return { username: u.username, email: u.email || "", created_at: u.created_at, admin: !!u.is_admin,
+        sp_level: progress.levelInfo(p.sp.xp).level, mp_level: progress.levelInfo(p.mp.xp).level,
+        sp_credits: p.sp.credits, mp_credits: p.mp.credits };
+    });
+}
+
+/** Full account for the admin page: profile, levels, stats, owned items, recent admin changes. */
+function getPlayer(name) {
+  const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
+  if (!u) return null;
+  const user = toUser(u);
+  const view_ = view(user);
+  view_.created_at = u.created_at;
+  view_.admin = !!u.is_admin;
+  view_.history = db.prepare("SELECT created_at, admin, action FROM admin_log WHERE target = ? ORDER BY id DESC LIMIT 30").all(u.username);
+  view_.catalog = { ships: progress.catalog.ships.map((s) => s.id), mods: progress.catalog.mods.map((m) => m.id),
+    designs: progress.catalog.designs.map((d) => d.id) };
+  return view_;
+}
+
+const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.trunc(Number(v) || 0)));
+
+/** Add (or take away, with negative numbers) XP and credits in one mode. */
+function adjustPlayer(adminName, name, track, xp, credits) {
+  if (!["sp", "mp"].includes(track)) return { error: "Pick Single Player or Multiplayer." };
+  xp = clampInt(xp, -1e9, 1e9);
+  credits = clampInt(credits, -1e9, 1e9);
+  if (!xp && !credits) return { error: "Enter an amount of XP or credits." };
+  const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
+  if (!u) return { error: "No such player." };
+  const user = toUser(u);
+  const t = user.profile[track];
+  const before = progress.levelInfo(t.xp).level;
+  t.xp = Math.max(0, t.xp + xp);
+  t.credits = Math.max(0, t.credits + credits);
+  save(user);
+  const after = progress.levelInfo(t.xp).level;
+  const mode = track === "sp" ? "Single Player" : "Multiplayer";
+  const parts = [];
+  if (xp) parts.push(`${xp > 0 ? "+" : ""}${xp} XP`);
+  if (credits) parts.push(`${credits > 0 ? "+" : ""}${credits} credits`);
+  logAdmin(adminName, user.username, `${mode}: ${parts.join(", ")}` + (after !== before ? ` (level ${before} → ${after})` : ""));
+  return {};
+}
+
+/** Unlock (or remove) a ship / mod / paint in one mode. The free starter items can't be removed. */
+function setPlayerItem(adminName, name, track, kind, id, owned) {
+  if (!["sp", "mp"].includes(track)) return { error: "Pick Single Player or Multiplayer." };
+  const table = { ships: progress.catalog.ships, mods: progress.catalog.mods, designs: progress.catalog.designs }[kind];
+  if (!table || !table.some((x) => x.id === id)) return { error: "Unknown item." };
+  if (!owned && (id === "small" || id === "classic")) return { error: "Starter items can't be removed." };
+  const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
+  if (!u) return { error: "No such player." };
+  const user = toUser(u);
+  const t = user.profile[track];
+  const list = t.owned[kind];
+  const has = list.includes(id);
+  if (owned && !has) list.push(id);
+  if (!owned && has) {
+    t.owned[kind] = list.filter((x) => x !== id);
+    // Take it off the hangar loadout too.
+    if (kind === "ships" && t.loadout.ship === id) t.loadout.ship = "small";
+    if (kind === "designs" && t.loadout.design === id) t.loadout.design = "classic";
+    if (kind === "mods") t.loadout.mods = t.loadout.mods.filter((x) => x !== id);
+  }
+  // Ship change can lower the slot count: trim fitted mods to fit.
+  const slots = (progress.catalog.ships.find((s) => s.id === t.loadout.ship) || { slots: 1 }).slots;
+  t.loadout.mods = t.loadout.mods.slice(0, slots);
+  save(user);
+  const mode = track === "sp" ? "Single Player" : "Multiplayer";
+  logAdmin(adminName, user.username, `${mode}: ${owned ? "unlocked" : "removed"} ${kind.slice(0, -1)} "${id}"`);
+  return {};
+}
+
 /** Top pilots. sp: best single-player score. mp: win rate (at least MIN_RACES races), then best race score. */
 const MIN_RACES = 3;
 function leaderboard(mode, limit = 10) {
@@ -468,4 +564,5 @@ module.exports = {
   addReport, listReports, setReportStatus, REPORT_CATEGORIES,
   TICKET_STATUSES, listTickets, getTicket, setTicketStatus, addTicketNote,
   setAdmin, listAdmins, adminLogin, adminForToken, adminLogout, ADMIN_SESSION_MS,
+  searchPlayers, getPlayer, adjustPlayer, setPlayerItem,
 };

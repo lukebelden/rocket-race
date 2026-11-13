@@ -140,3 +140,24 @@ input, select, textarea {
   .topbar, .tabs, .filters { padding-left: 16px; padding-right: 16px; }
   .list { max-height: 50vh; }
 }
+
+/* Admin sections + player editor */
+.views { display: flex; gap: 6px; margin-right: auto; margin-left: 24px; }
+.mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.mode-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+.mode-card h3 { margin: 0; font-size: 16px; color: var(--gold); }
+.mode-card .nums { display: flex; gap: 16px; font-size: 14px; }
+.mode-card .nums b { font-size: 18px; color: var(--text); display: block; }
+.adjust { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
+.adjust label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.items { display: flex; flex-wrap: wrap; gap: 6px; }
+.item { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+.item[aria-pressed="true"] { border-color: var(--resolved); color: var(--resolved); }
+.item-group { display: grid; gap: 4px; }
+.item-group span { font-size: 12px; color: var(--muted); }
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.history li { color: var(--muted); }
+.history b { color: var(--text); font-weight: 500; }
+.ok { color: var(--resolved); min-height: 1.2em; margin: 0; }
+@media (max-width: 760px) { .views { margin-left: 8px; } .topbar { flex-wrap: wrap; } .adjust { grid-template-columns: 1fr 1fr; } }
+.open-player { margin-top: 8px; }

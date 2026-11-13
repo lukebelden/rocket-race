@@ -57,7 +57,7 @@ function newProfile() {
 
 const int = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
 
-function cleanTrack(input) {
+function cleanTrack(input, checkLevels = false) {
   const t = newTrack();
   if (!input || typeof input !== "object") return t;
   t.xp = int(input.xp, 1e9);
@@ -67,7 +67,7 @@ function cleanTrack(input) {
   for (const kind of ["ships", "mods", "designs"]) {
     const out = new Set(t.owned[kind]);
     for (const id of Array.isArray(owned[kind]) ? owned[kind] : []) {
-      if (TABLES[kind][id] && TABLES[kind][id].level <= lvl) out.add(id);
+      if (TABLES[kind][id] && (!checkLevels || TABLES[kind][id].level <= lvl)) out.add(id);
     }
     t.owned[kind] = [...out];
   }
@@ -77,7 +77,7 @@ function cleanTrack(input) {
 
 /** Make any stored/uploaded profile safe and complete (unknown ids dropped, numbers clamped).
  *  Also upgrades the older single-wallet profile shape (credits/owned/loadout at the top). */
-function sanitize(input, { allowMp = true } = {}) {
+function sanitize(input, { allowMp = true, checkLevels = false } = {}) {
   const p = newProfile();
   if (!input || typeof input !== "object") return p;
   const legacy = input.owned && !(input.sp && input.sp.owned);
@@ -90,8 +90,8 @@ function sanitize(input, { allowMp = true } = {}) {
     };
   }
   p.character = CHARACTERS[input.character] ? input.character : "duck";
-  p.sp = cleanTrack(input.sp);
-  p.mp = allowMp ? cleanTrack(input.mp) : newTrack();
+  p.sp = cleanTrack(input.sp, checkLevels);
+  p.mp = allowMp ? cleanTrack(input.mp, checkLevels) : newTrack();
   const stats = input.stats || {};
   p.stats = {
     sp_runs: int(stats.sp_runs, 1e9),

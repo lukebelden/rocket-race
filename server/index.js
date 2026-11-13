@@ -329,6 +329,23 @@ async function handleAdminApi(req, res, url) {
       const p = url.searchParams;
       return json(res, 200, accounts.listTickets({ status: p.get("status") || "all", category: p.get("category") || "all", q: p.get("q") || "" }));
     }
+    if (route === "GET /api/admin/players") return json(res, 200, { rows: accounts.searchPlayers(url.searchParams.get("q") || "") });
+    const pm = url.pathname.match(/^\/api\/admin\/players\/([A-Za-z0-9_]{1,16})(\/adjust|\/item)?$/);
+    if (pm) {
+      if (req.method === "GET" && !pm[2]) {
+        const p = accounts.getPlayer(pm[1]);
+        return p ? json(res, 200, p) : json(res, 404, { error: "No such player." });
+      }
+      if (req.method === "POST" && pm[2]) {
+        const body = await readJson(req);
+        const result = pm[2] === "/adjust"
+          ? accounts.adjustPlayer(admin.username, pm[1], String(body.track), body.xp, body.credits)
+          : accounts.setPlayerItem(admin.username, pm[1], String(body.track), String(body.kind), String(body.id), !!body.owned);
+        if (result.error) return json(res, 400, { error: result.error });
+        console.log(`Admin ${admin.username} edited player ${pm[1]}`);
+        return json(res, 200, accounts.getPlayer(pm[1]));
+      }
+    }
     const m = url.pathname.match(/^\/api\/admin\/tickets\/(\d+)(\/status|\/notes)?$/);
     if (m) {
       const id = Number(m[1]);
