@@ -1,0 +1,24 @@
+#cloud-config
+# First-boot setup for the Rocket Race Droplet (Ubuntu 24.04):
+# Docker + Compose, a firewall that only allows SSH and web traffic, a swap file
+# (helps the 1 GB Droplet build the Docker image), and automatic security updates.
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - ufw
+  - unattended-upgrades
+runcmd:
+  - fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 443/udp
+  - ufw --force enable
+  - systemctl enable --now docker
+  - mkdir -p /opt/rocket-race
+  - touch /root/cloud-init-done

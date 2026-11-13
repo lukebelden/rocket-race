@@ -1,0 +1,14 @@
+# Caddy: HTTPS in front of the game server. Gets and renews a free Let's Encrypt
+# certificate for SITE_ADDRESS automatically (e.g. 164-90-1-2.sslip.io or your domain).
+{$SITE_ADDRESS} {
+	# The web build is big (~40 MB of WebAssembly): compress it on the way out.
+	encode zstd gzip
+
+	# Game, API, admin page and the /ws race socket all live in the "game" container.
+	reverse_proxy game:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

@@ -1,30 +1,27 @@
-# Rocket Race on a DigitalOcean Droplet (NOT deployed yet).
+# Rocket Race on a DigitalOcean Droplet: the game server + Caddy for HTTPS.
 #
-# Why a Droplet: player accounts live in a SQLite file, and App Platform has no disk that
-# survives restarts. A $6/mo Droplet with Docker keeps it in the rocket-data volume below.
+# Player accounts live in a SQLite file in the rocket-data volume (App Platform has no disk
+# that survives restarts, which is why this runs on a Droplet).
 #
-# On the Droplet (Ubuntu + Docker):
-#   git clone https://github.com/lukebelden/rocket-dodge.git && cd rocket-dodge
-#   docker compose up -d --build
-# Then put HTTPS in front (e.g. Caddy) so browsers can use wss:// - see the README notes.
+# Settings go in a .env file next to this one (never commit it):
+#   SITE_ADDRESS=164-90-1-2.sslip.io     # or your own domain
+#   SMTP_HOST=... SMTP_PORT=587 SMTP_USER=... SMTP_PASS=... MAIL_FROM=... REPORT_EMAIL=...
 #
-# Tickets (player reports): open https://<your-domain>/admin and log in with an admin
-# game account. Make an account an admin with:
-#   docker compose exec game node server/admins.js add <username>
-#
+# Deploy / update from your PC:   bash deploy/deploy.sh <droplet-ip>
+# On the server:                  cd /opt/rocket-race && docker compose up -d --build
+# Admins:   docker compose exec game node server/admins.js add <username>
+# Tickets:  https://<SITE_ADDRESS>/admin
 # Back up the database now and then:
 #   docker compose cp game:/data/rocket-race.db ./rocket-race-backup.db
 services:
   game:
     build: .
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"                    # only reachable through Caddy, not from the internet
     environment:
-      TRUST_PROXY: "1"            # behind Caddy/nginx: rate limits use the real client IP
-      # Email for password reset codes (and report forwarding). Any SMTP provider works,
-      # e.g. Resend, SendGrid, Mailgun, Postmark. Put real values in a .env file next to
-      # this one (never commit it):
+      TRUST_PROXY: "1"            # behind Caddy: rate limits use the real client IP
+      # Email for password reset codes (and report forwarding): any SMTP provider.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -34,5 +31,23 @@ services:
     volumes:
       - rocket-data:/data
 
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - game
+
 volumes:
   rocket-data:
+  caddy-data:
+  caddy-config:
