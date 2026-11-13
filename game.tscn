@@ -225,7 +225,7 @@ theme_override_font_sizes/font_size = 24
 vertical_alignment = 1
 grow_horizontal = 0
 theme_override_colors/font_color = Color(1, 0.8, 0.45, 1)
-text = "Level 1 Ã‚Â· The Moon"
+text = "Level 1 · The Moon"
 horizontal_alignment = 2
 
 [node name="LevelBanner" type="Label" parent="UI/Root"]
@@ -292,7 +292,7 @@ theme_override_constants/separation = 3
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
 theme_override_font_sizes/font_size = 14
-text = "BOOST FUEL  [Shift]"
+text = "BOOST FUEL  [W / Shift]"
 
 [node name="BoostBar" type="ProgressBar" parent="UI/Root/Dashboard/FuelBox"]
 custom_minimum_size = Vector2(0, 14)
@@ -338,7 +338,7 @@ theme_override_constants/separation = 0
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 14
-text = "NAV BEACON Ã‚Â· NEXT: LVL 3"
+text = "NAV BEACON · NEXT: LVL 2"
 
 [node name="NavValue" type="Label" parent="UI/Root/Dashboard/NavBox"]
 layout_mode = 2
@@ -372,7 +372,7 @@ theme_override_constants/separation = 2
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 12
-text = "SHIP COMPUTER Ã‚Â· TIP"
+text = "SHIP COMPUTER · TIP"
 
 [node name="TipText" type="Label" parent="UI/Root/TipPanel/VBox"]
 custom_minimum_size = Vector2(290, 0)
@@ -595,7 +595,7 @@ horizontal_alignment = 1
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 15
-text = "GLOBAL Ã‚Â· ONLINE"
+text = "GLOBAL · ONLINE"
 
 [node name="OnlineCaution" type="PanelContainer" parent="UI/Root/Scoreboard/Panel/VBox"]
 layout_mode = 2
@@ -634,7 +634,7 @@ columns = 4
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
 theme_override_font_sizes/font_size = 15
-text = "YOUR TOP RUNS Ã‚Â· THIS DEVICE"
+text = "YOUR TOP RUNS · THIS DEVICE"
 
 [node name="LocalList" type="GridContainer" parent="UI/Root/Scoreboard/Panel/VBox"]
 layout_mode = 2

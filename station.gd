@@ -1,5 +1,5 @@
 extends Area2D
-## Refuel station: drifts down the screen every two planets. Fly into it to refill the booster.
+## Refuel station: drifts down the screen on every even level. Fly into it to refill the booster.
 ## It never hurts the rocket; once used it powers down (greys out).
 
 const Obstacle := preload("res://obstacle.gd")

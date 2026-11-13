@@ -207,7 +207,7 @@ func _ready() -> void:
 	_update_layout()
 	get_window().size_changed.connect(_update_layout)
 	rocket.booster_lost.connect(_on_booster_lost)
-	fuel_label.text = "BOOST FUEL" if touch_ui else "BOOST FUEL  [Shift]"
+	fuel_label.text = "BOOST FUEL" if touch_ui else "BOOST FUEL  [W / Shift]"
 	dashboard.visible = false
 
 	var size := get_viewport_rect().size
@@ -227,7 +227,7 @@ func _ready() -> void:
 	# A web page can't close its own tab, so Quit would only freeze the game there.
 	quit_button.visible = not OS.has_feature("web")
 	hint_label.text = ("Hold and drag to steer\nHold BOOST to fly faster" if touch_ui
-		else "Move: Left / Right or A / D\nBoost (fly faster): Shift or Space")
+		else "Move: Left / Right or A / D\nBoost: W or Shift  ·  Missile: Space")
 
 	# Settings
 	difficulty_option.add_item("Easy", Difficulty.EASY)
@@ -262,6 +262,7 @@ func _process(delta: float) -> void:
 	_update_damage_effects(delta)
 	_update_background()
 	_update_missiles(delta)
+	rocket.missile_count = missile_ammo  # missiles shown on the rocket's launch rails
 	_update_mod_panel()
 	_update_radar()
 	if state == State.READY or state == State.PLAYING or state == State.DOCKED or state == State.OVER:
@@ -288,7 +289,7 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Missile Pod mod: F / E fires.
+	# Missile Pod mod: Space fires.
 	if state == State.PLAYING and event.is_action_pressed("missile"):
 		get_viewport().set_input_as_handled()
 		_fire_missile()
@@ -577,8 +578,8 @@ func _update_playing(delta: float) -> void:
 		_show_level_banner()
 	_update_hud()
 
-	# Refuel station after every two planets (Levels 3, 5, 7, ...), a few seconds into the level.
-	if level >= 3 and (level - 1) % 2 == 0 and station_level != level and level_time >= 3.0:
+	# Refuel station on every even level (2, 4, 6, ...), a few seconds into the level.
+	if _is_station_level(level) and station_level != level and level_time >= 3.0:
 		_spawn_station()
 
 	# Asteroids are spaced by distance, so flying faster means meeting them more often.
@@ -616,14 +617,14 @@ func _update_hud() -> void:
 
 ## General tips, rotated every few seconds.
 func _general_tips() -> Array[String]:
-	var boost_key := "the BOOST button" if touch_ui else "Shift / Space"
+	var boost_key := "the BOOST button" if touch_ui else "W or Shift"
 	return [
 		"Hold %s to boost: you fly and score faster, but asteroids come at you quicker too." % boost_key,
-		"Your booster can be refilled at refuel stations. One appears every two planets.",
+		"Your booster can be refilled at refuel stations. One appears on every even level (2, 4, 6...).",
 		"If your booster runs completely dry it detaches, and you can't get it back.",
 		"Dock at a station to choose: refuel the booster OR repair 25% hull, then pick a ship mod.",
 		"Your ship has 2 mod slots. Stations offer 2 random mods; when both slots are full you swap one out.",
-		"The Missile Pod holds 5 missiles and reloads automatically every time you dock.",
+		"The Missile Pod holds 5 missiles (fire with %s) and reloads automatically every time you dock." % ("the MISSILE button" if touch_ui else "Space"),
 		"Bigger asteroids do more hull damage. Small ones only scratch.",
 		"Orange-glowing asteroids don't fall straight: they sway or drift sideways.",
 		"The NAV BEACON shows the range to the next refuel station.",
@@ -701,18 +702,19 @@ func _position_tip_panel(console_height: float) -> void:
 
 # --- Booster -----------------------------------------------------------------
 
-## Keyboard keys for boosting: Shift, Space, W or Up arrow.
+## Keyboard keys: boost = W or Shift, missile = Space.
 func _setup_boost_input() -> void:
 	if InputMap.has_action("boost"):
 		return
+	# Boost: W or Shift.
 	InputMap.add_action("boost")
-	for key in [KEY_SHIFT, KEY_SPACE, KEY_W, KEY_UP]:
+	for key in [KEY_W, KEY_SHIFT]:
 		var event := InputEventKey.new()
 		event.physical_keycode = key
 		InputMap.action_add_event("boost", event)
-	# Missile Pod mod: F or E fires a missile.
+	# Missile Pod mod: Space fires a missile (Space also launches from the pad).
 	InputMap.add_action("missile")
-	for key in [KEY_F, KEY_E]:
+	for key in [KEY_SPACE]:
 		var event := InputEventKey.new()
 		event.physical_keycode = key
 		InputMap.action_add_event("missile", event)
@@ -797,7 +799,7 @@ func _update_dashboard() -> void:
 		if rocket.boosting:
 			color = color.lightened(0.3)
 		_set_fill(boost_bar, color)
-		_set_label(fuel_label, ("FUEL LOW" if low_fuel else "BOOST FUEL") + ("" if touch_ui else "  [Shift]"), Color(1, 0.75, 0.35))
+		_set_label(fuel_label, ("FUEL LOW" if low_fuel else "BOOST FUEL") + ("" if touch_ui else "  [W / Shift]"), Color(1, 0.75, 0.35))
 
 	# Hull integrity: green -> yellow -> red, flashing when critical. The bar's full length
 	# is the max hull (150% with the Reinforced Hull mod).
@@ -832,8 +834,9 @@ func _set_modulate(item: CanvasItem, color: Color) -> void:
 		item.modulate = color
 
 
+## Refuel stations appear on every even level: 2, 4, 6, ...
 func _is_station_level(lvl: int) -> bool:
-	return lvl >= 3 and (lvl - 1) % 2 == 0
+	return lvl >= 2 and lvl % 2 == 0
 
 
 ## NAV BEACON: range to the refuel station on levels that have one, otherwise NOT TRACKING.
@@ -1057,6 +1060,7 @@ func _install_mod(id: String, slot: int) -> void:
 
 ## Recalculate everything the fitted mods change.
 func _apply_mods() -> void:
+	rocket.mods.assign(mods)  # the rocket draws its fitted mods
 	rocket.agility = ModInfo.RCS_AGILITY if mods.has("rcs") else 1.0
 	var new_max := 1.0 + (ModInfo.HULL_BONUS if mods.has("hull") else 0.0)
 	if new_max > hull_max:
@@ -1166,7 +1170,7 @@ func _update_mod_panel() -> void:
 			"healing": text = "Hull full" if hull >= hull_max else "Repairing hull…"
 			"missile":
 				if missile_ammo > 0:
-					text = "MISSILES %d/%d%s" % [missile_ammo, ModInfo.MISSILE_AMMO, "" if touch_ui else "  [F]"]
+					text = "MISSILES %d/%d%s" % [missile_ammo, ModInfo.MISSILE_AMMO, "" if touch_ui else "  [Space]"]
 					color = Color(1, 0.75, 0.6)
 				else:
 					text = "EMPTY · reloads at stations"

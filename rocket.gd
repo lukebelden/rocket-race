@@ -34,6 +34,13 @@ var boost_button_held: bool = false
 var no_steer_rects: Array[Rect2] = []
 ## Side-to-side speed multiplier (the RCS Jets mod raises it).
 var agility: float = 1.0
+## Fitted ship mods (set by game.gd) - each one changes how the rocket looks, using the
+## same colours as its mod icon. missile_count = missiles left in the Missile Pod.
+var mods: Array[String] = []
+var missile_count: int = 0
+var _time: float = 0.0
+
+const ModInfo := preload("res://mods.gd")
 
 ## Screen x position of the finger steering the rocket, or NAN when not touching.
 var touch_x: float = NAN
@@ -68,6 +75,7 @@ func _process(delta: float) -> void:
 	var screen := get_viewport_rect().size
 	position.y = screen.y - bottom_gap
 
+	_time += delta
 	_flicker = randf_range(0.75, 1.2)
 	_trail.emitting = flame_on
 	queue_redraw()
@@ -152,12 +160,17 @@ func _draw() -> void:
 	var white := Color(0.95, 0.96, 0.98)
 	var shade := Color(0.75, 0.78, 0.84)
 
-	# Engine flame: layered outer / inner / core, flickering. Bigger while boosting.
+	var thruster := mods.has("thruster")
+
+	# Engine flame: layered outer / inner / core, flickering. Bigger while boosting, and
+	# wider/longer with the Bigger Thruster mod.
 	if flame_on:
-		var f := flame_power * _flicker * (1.5 if boosting else 1.0)
-		draw_colored_polygon(PackedVector2Array([Vector2(-9, 22), Vector2(9, 22), Vector2(4, 22 + 16 * f), Vector2(0, 24 + 30 * f), Vector2(-4, 22 + 16 * f)]), Color(1.0, 0.45, 0.1, 0.9))
-		draw_colored_polygon(PackedVector2Array([Vector2(-6, 22), Vector2(6, 22), Vector2(0, 23 + 20 * f)]), Color(1.0, 0.82, 0.25))
-		draw_colored_polygon(PackedVector2Array([Vector2(-3, 22), Vector2(3, 22), Vector2(0, 23 + 9 * f)]), Color(1, 1, 0.9))
+		var f := flame_power * _flicker * (1.5 if boosting else 1.0) * (1.3 if thruster else 1.0)
+		var w := 1.4 if thruster else 1.0
+		var y0 := 27.0 if thruster else 22.0
+		draw_colored_polygon(PackedVector2Array([Vector2(-9 * w, y0), Vector2(9 * w, y0), Vector2(4 * w, y0 + 16 * f), Vector2(0, y0 + 2 + 30 * f), Vector2(-4 * w, y0 + 16 * f)]), Color(1.0, 0.45, 0.1, 0.9))
+		draw_colored_polygon(PackedVector2Array([Vector2(-6 * w, y0), Vector2(6 * w, y0), Vector2(0, y0 + 1 + 20 * f)]), Color(1.0, 0.82, 0.25))
+		draw_colored_polygon(PackedVector2Array([Vector2(-3 * w, y0), Vector2(3 * w, y0), Vector2(0, y0 + 1 + 9 * f)]), Color(1, 1, 0.9))
 
 	# Booster pod flames (blue-white, hotter looking).
 	if has_booster and boosting:
@@ -167,15 +180,35 @@ func _draw() -> void:
 			draw_colored_polygon(PackedVector2Array([Vector2(x - 4, 22), Vector2(x + 4, 22), Vector2(x, 24 + 26 * bf)]), Color(0.45, 0.75, 1.0, 0.85))
 			draw_colored_polygon(PackedVector2Array([Vector2(x - 2, 22), Vector2(x + 2, 22), Vector2(x, 23 + 14 * bf)]), Color(0.9, 0.97, 1.0))
 
-	# Nozzle.
-	draw_colored_polygon(PackedVector2Array([Vector2(-7, 17), Vector2(7, 17), Vector2(9, 24), Vector2(-9, 24)]), Color(0.3, 0.32, 0.36))
-	draw_line(Vector2(-8, 21), Vector2(8, 21), Color(0.45, 0.47, 0.52), 1.5)
+	# Nozzle (Bigger Thruster: a wider engine bell with a glowing orange rim).
+	if thruster:
+		var tc: Color = ModInfo.MODS["thruster"]["color"]
+		draw_colored_polygon(PackedVector2Array([Vector2(-8, 16), Vector2(8, 16), Vector2(13, 27), Vector2(-13, 27)]), Color(0.26, 0.27, 0.31))
+		draw_line(Vector2(-11, 22), Vector2(11, 22), Color(0.45, 0.47, 0.52), 1.5)
+		draw_line(Vector2(-13, 27), Vector2(13, 27), tc, 2.5)
+	else:
+		draw_colored_polygon(PackedVector2Array([Vector2(-7, 17), Vector2(7, 17), Vector2(9, 24), Vector2(-9, 24)]), Color(0.3, 0.32, 0.36))
+		draw_line(Vector2(-8, 21), Vector2(8, 21), Color(0.45, 0.47, 0.52), 1.5)
 
 	# Side fins (with a darker lower edge).
 	for side in [-1.0, 1.0]:
 		var s: float = side
 		draw_colored_polygon(PackedVector2Array([Vector2(10 * s, -2), Vector2(23 * s, 18), Vector2(23 * s, 27), Vector2(10 * s, 19)]), red)
 		draw_colored_polygon(PackedVector2Array([Vector2(23 * s, 22), Vector2(23 * s, 27), Vector2(10 * s, 19), Vector2(10 * s, 15)]), dark_red)
+
+	# Missile Pod: launch rails on the fin tips with the loaded missiles on them
+	# (left rail empties first; both empty when you're out of missiles).
+	if mods.has("missile"):
+		var mc: Color = ModInfo.MODS["missile"]["color"]
+		for i in 2:
+			var s := -1.0 if i == 0 else 1.0
+			var x := 27.0 * s
+			draw_rect(Rect2(x - 1.5, 4, 3, 22), Color(0.3, 0.32, 0.36))
+			if missile_count > 1 - i:
+				draw_rect(Rect2(x - 2.2, 2, 4.4, 15), Color(0.93, 0.94, 0.97))
+				draw_colored_polygon(PackedVector2Array([Vector2(x - 2.2, 2), Vector2(x + 2.2, 2), Vector2(x, -4)]), mc)
+				draw_colored_polygon(PackedVector2Array([Vector2(x - 2.2, 13), Vector2(x - 4.5, 18), Vector2(x - 2.2, 17)]), mc.darkened(0.3))
+				draw_colored_polygon(PackedVector2Array([Vector2(x + 2.2, 13), Vector2(x + 4.5, 18), Vector2(x + 2.2, 17)]), mc.darkened(0.3))
 
 	# Booster pods strapped to the sides.
 	if has_booster:
@@ -190,6 +223,33 @@ func _draw() -> void:
 	draw_colored_polygon(PackedVector2Array([Vector2(0, -34), Vector2(6, -27), Vector2(9, -19), Vector2(-9, -19), Vector2(-6, -27)]), red)
 	draw_colored_polygon(PackedVector2Array([Vector2(0, -34), Vector2(6, -27), Vector2(9, -19), Vector2(3, -19)]), dark_red)
 
+	# Radar: antenna mast and dish on the nose, with a blinking beacon.
+	if mods.has("radar"):
+		var rc: Color = ModInfo.MODS["radar"]["color"]
+		draw_line(Vector2(0, -34), Vector2(0, -45), Color(0.6, 0.63, 0.7), 1.5)
+		draw_arc(Vector2(0, -41), 7.0, PI * 1.15, PI * 1.85, 10, rc, 2.0, true)
+		draw_circle(Vector2(0, -46), 1.8, rc if fmod(_time, 1.0) < 0.5 else rc.darkened(0.6))
+
+	# Reinforced Hull: bolted steel armour plates along both sides of the body.
+	if mods.has("hull"):
+		var hc: Color = ModInfo.MODS["hull"]["color"]
+		for s in [-1.0, 1.0]:
+			draw_colored_polygon(PackedVector2Array([Vector2(11 * s, -13), Vector2(7 * s, -15), Vector2(7 * s, 17), Vector2(11 * s, 18)]), hc.darkened(0.25))
+			draw_line(Vector2(7 * s, -15), Vector2(7 * s, 17), hc.darkened(0.5), 1.0)
+			for ry in [-9.0, 1.0, 11.0]:
+				draw_circle(Vector2(9 * s, ry), 1.0, hc.darkened(0.55))
+
+	# RCS Jets: small thruster nubs on the sides that puff when you steer.
+	if mods.has("rcs"):
+		var cc: Color = ModInfo.MODS["rcs"]["color"]
+		for s in [-1.0, 1.0]:
+			draw_rect(Rect2(10.5 * s - 1.5, -17, 3, 5), cc)
+		# Moving right fires the left jet (it pushes you right), and vice versa.
+		if absf(velocity_x) > 40.0 and active:
+			var s := -1.0 if velocity_x > 0.0 else 1.0
+			var length := 6.0 + 6.0 * _flicker * clampf(absf(velocity_x) / max_speed, 0.3, 1.0)
+			draw_colored_polygon(PackedVector2Array([Vector2(12 * s, -16.5), Vector2((12 + length) * s, -14.5), Vector2(12 * s, -12.5)]), Color(cc.lightened(0.4), 0.85))
+
 	# Panel line and red band.
 	draw_line(Vector2(-10, 2), Vector2(10, 2), Color(0.6, 0.63, 0.7), 1.0)
 	draw_rect(Rect2(-10, 10, 20, 4), red)
@@ -199,6 +259,17 @@ func _draw() -> void:
 	draw_circle(Vector2(0, -7), 5.0, Color(0.2, 0.55, 0.95))
 	draw_circle(Vector2(1.5, -5.5), 2.5, Color(0.12, 0.35, 0.75))
 	draw_circle(Vector2(-1.8, -8.8), 1.6, Color(1, 1, 1, 0.9))
+
+	# Healing Panel: a pulsing green repair cross on the hull.
+	if mods.has("healing"):
+		var gc: Color = ModInfo.MODS["healing"]["color"]
+		var pulse := 0.75 + 0.25 * sin(_time * 4.0)
+		var dark := gc.darkened(0.55)
+		draw_circle(Vector2(0, 6), 6.5, Color(gc, 0.3 * pulse))  # soft glow
+		draw_rect(Rect2(-2.2, 1.2, 4.4, 9.6), dark)  # dark outline so it reads on the white hull
+		draw_rect(Rect2(-4.8, 3.8, 9.6, 4.4), dark)
+		draw_rect(Rect2(-1.3, 2.1, 2.6, 7.8), gc.lightened(0.2 * pulse))
+		draw_rect(Rect2(-3.9, 4.7, 7.8, 2.6), gc.lightened(0.2 * pulse))
 
 	# Centre fin (in front of the body).
 	draw_colored_polygon(PackedVector2Array([Vector2(-1.8, 6), Vector2(1.8, 6), Vector2(1.8, 26), Vector2(-1.8, 26)]), dark_red)
