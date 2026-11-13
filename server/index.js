@@ -9,6 +9,8 @@
 // Run locally:   cd server && npm install && npm start   ->  http://localhost:8080
 // Environment:   PORT (default 8080), STATIC_DIR (default ../build/web), MIN_PLAYERS (default 2),
 //                DATA_DIR (default server/data: the accounts database lives here - keep it backed up)
+//                TRUST_PROXY=1 behind a reverse proxy (uses X-Forwarded-For for rate limits)
+//                SMTP_* / MAIL_FROM / REPORT_EMAIL for email - see mailer.js
 
 const http = require("http");
 const fs = require("fs");
@@ -17,6 +19,7 @@ const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
 const accounts = require("./accounts");
 const progress = require("./progress");
+const mailer = require("./mailer");
 
 const PORT = Number(process.env.PORT) || 8080;
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR || path.join(__dirname, "..", "build", "web"));
@@ -74,6 +77,9 @@ function serveStatic(req, res) {
       "Content-Length": stat.size,
       // Game files change with every export: always revalidate so players get the new build.
       "Cache-Control": "public, max-age=0, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "SAMEORIGIN",
     });
     if (req.method === "HEAD") return res.end();
     fs.createReadStream(file).pipe(res);
@@ -81,27 +87,49 @@ function serveStatic(req, res) {
 }
 
 // --- Account API (JSON) ------------------------------------------------------------------
-//   POST /api/signup  {username, password, guest?}   -> {token, profile}
-//   POST /api/login   {username, password}           -> {token, profile}
-//   POST /api/logout                                  (Authorization: Bearer <token>)
+//   POST /api/signup  {username, password, email, guest?}  -> {token, profile}
+//   POST /api/login   {username (or email), password}      -> {token, profile}
+//   POST /api/forgot  {login}                  -> {ok}   emails a reset code (if the account has an email)
+//   POST /api/reset   {login, code, password}  -> {token, profile}
+//   POST /api/report  {category, message, target?, platform?}  -> {ok, id}   (login optional)
+//   GET  /api/leaderboard?mode=sp|mp   (public)  -> {rows: [...]}
+// Logged in (Authorization: Bearer <token>):
+//   POST /api/logout
 //   GET  /api/me                                      -> {profile}
 //   POST /api/run     {score, level}                  -> {profile, reward}   single-player run
 //   POST /api/buy     {track: sp|mp, kind: ships|mods|designs, id}  -> {profile}
 //   POST /api/loadout {track: sp|mp, ship, design, mods}            -> {profile}
 //   POST /api/character {character}                                 -> {profile}
-//   GET  /api/leaderboard?mode=sp|mp   (public)  -> {rows: [...]}
+//   POST /api/account/password {current, password}  -> {token, profile}  (other devices signed out)
+//   POST /api/account/email    {password, email}     -> {profile}
+//   POST /api/account/delete   {password}            -> {ok}
 
-const loginAttempts = new Map(); // ip -> {count, since}
+const limits = new Map(); // "kind:key" -> {count, since}
 
-function tooManyAttempts(ip) {
+/** Simple fixed-window rate limit. Returns true when the caller should be refused. */
+function limited(kind, key, max, windowMs) {
+  const id = kind + ":" + key;
   const now = Date.now();
-  const a = loginAttempts.get(ip);
-  if (!a || now - a.since > 10 * 60 * 1000) {
-    loginAttempts.set(ip, { count: 1, since: now });
+  const a = limits.get(id);
+  if (!a || now - a.since > windowMs) {
+    limits.set(id, { count: 1, since: now });
     return false;
   }
   a.count++;
-  return a.count > 20;
+  return a.count > max;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, a] of limits) if (now - a.since > 3600 * 1000) limits.delete(id);
+}, 600 * 1000).unref();
+
+/** Client IP. Behind a reverse proxy (Caddy/nginx on the Droplet) set TRUST_PROXY=1. */
+function clientIp(req) {
+  if (process.env.TRUST_PROXY) {
+    const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || "?";
 }
 
 function readJson(req) {
@@ -123,21 +151,38 @@ function readJson(req) {
 }
 
 function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
   res.end(JSON.stringify(data));
 }
+
+const SLOW = { error: "Too many tries. Wait a few minutes and try again." };
 
 async function handleApi(req, res, url) {
   const route = req.method + " " + url.pathname;
   const token = String(req.headers.authorization || "").replace(/^Bearer /, "");
+  const ip = clientIp(req);
   try {
     if (route === "POST /api/signup" || route === "POST /api/login") {
-      const ip = req.socket.remoteAddress || "?";
-      if (tooManyAttempts(ip)) return json(res, 429, { error: "Too many tries. Wait a few minutes." });
+      if (limited("login", ip, 20, 10 * 60 * 1000)) return json(res, 429, SLOW);
       const body = await readJson(req);
       const result = route === "POST /api/signup"
-        ? accounts.signup(body.username, body.password, body.guest)
+        ? accounts.signup(body.username, body.password, body.email, body.guest)
         : accounts.login(body.username, body.password);
+      if (result.error) return json(res, 400, { error: result.error });
+      return json(res, 200, { token: result.token, profile: accounts.view(result.user) });
+    }
+    if (route === "POST /api/forgot") {
+      if (limited("forgot", ip, 5, 15 * 60 * 1000)) return json(res, 429, SLOW);
+      const body = await readJson(req);
+      const reset = accounts.startReset(body.login);
+      if (reset) mailer.sendResetCode(reset.email, reset.username, reset.code);
+      // Same answer whether or not the account exists, so this can't be used to find accounts.
+      return json(res, 200, { ok: true });
+    }
+    if (route === "POST /api/reset") {
+      if (limited("reset", ip, 10, 15 * 60 * 1000)) return json(res, 429, SLOW);
+      const body = await readJson(req);
+      const result = accounts.finishReset(body.login, body.code, body.password);
       if (result.error) return json(res, 400, { error: result.error });
       return json(res, 200, { token: result.token, profile: accounts.view(result.user) });
     }
@@ -145,6 +190,20 @@ async function handleApi(req, res, url) {
       const mode = url.searchParams.get("mode") === "mp" ? "mp" : "sp";
       return json(res, 200, { mode, rows: accounts.leaderboard(mode) });
     }
+    if (route === "POST /api/report") {
+      const reporter = accounts.userForToken(token);
+      if (limited("report", reporter ? "u" + reporter.id : ip, 5, 60 * 60 * 1000)) {
+        return json(res, 429, { error: "You've sent a few reports already. Please try again later." });
+      }
+      const body = await readJson(req);
+      const result = accounts.addReport({ user: reporter, category: String(body.category), target: body.target,
+        message: body.message, platform: body.platform });
+      if (result.error) return json(res, 400, { error: result.error });
+      mailer.forwardReport({ ...result, username: reporter ? reporter.username : "guest", target: body.target,
+        message: String(body.message || "").slice(0, 2000), platform: String(body.platform || "") });
+      return json(res, 200, { ok: true, id: result.id });
+    }
+
     const user = accounts.userForToken(token);
     if (!user) return json(res, 401, { error: "Please log in again." });
     if (route === "POST /api/logout") {
@@ -173,6 +232,20 @@ async function handleApi(req, res, url) {
       progress.setLoadout(user.profile, String(body.track), body);
       accounts.save(user);
       return json(res, 200, { profile: accounts.view(user) });
+    }
+    if (route.startsWith("POST /api/account/")) {
+      if (limited("account", "u" + user.id, 10, 15 * 60 * 1000)) return json(res, 429, SLOW);
+      let result;
+      if (route === "POST /api/account/password") result = accounts.changePassword(user, body.current, body.password);
+      else if (route === "POST /api/account/email") result = accounts.changeEmail(user, body.password, body.email);
+      else if (route === "POST /api/account/delete") result = accounts.deleteAccount(user, body.password);
+      else return json(res, 404, { error: "Unknown request." });
+      if (result.error) return json(res, 400, { error: result.error });
+      if (route === "POST /api/account/delete") {
+        console.log(`Account deleted: ${user.username}`);
+        return json(res, 200, { ok: true });
+      }
+      return json(res, 200, { token: result.token || token, profile: accounts.view(user) });
     }
     return json(res, 404, { error: "Unknown request." });
   } catch (err) {

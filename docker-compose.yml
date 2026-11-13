@@ -8,6 +8,8 @@
 #   docker compose up -d --build
 # Then put HTTPS in front (e.g. Caddy) so browsers can use wss:// - see the README notes.
 #
+# Read player reports:   docker compose exec game node server/reports.js
+#
 # Back up the database now and then:
 #   docker compose cp game:/data/rocket-race.db ./rocket-race-backup.db
 services:
@@ -16,6 +18,17 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    environment:
+      TRUST_PROXY: "1"            # behind Caddy/nginx: rate limits use the real client IP
+      # Email for password reset codes (and report forwarding). Any SMTP provider works,
+      # e.g. Resend, SendGrid, Mailgun, Postmark. Put real values in a .env file next to
+      # this one (never commit it):
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-Rocket Race <no-reply@example.com>}
+      REPORT_EMAIL: ${REPORT_EMAIL:-}
     volumes:
       - rocket-data:/data
 

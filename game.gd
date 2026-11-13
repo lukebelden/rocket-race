@@ -133,6 +133,7 @@ var account_button: Button
 var mode_menu: Control
 var _menu_track := ""
 var hangar_bg: Control
+var delete_button: Button
 ## Checked the saved login with the server once per game session.
 static var _profile_checked: bool = false
 
@@ -614,6 +615,7 @@ func _record_run() -> void:
 
 func _open_settings() -> void:
 	menu.visible = false
+	delete_button.visible = Profile.is_account()
 	settings.visible = true
 	back_button.grab_focus()
 
@@ -2343,7 +2345,19 @@ func _make_profile_ui() -> void:
 	account_button.custom_minimum_size = start_button.custom_minimum_size
 	account_button.add_theme_font_size_override("font_size", 22)
 	account_button.pressed.connect(_open_profile_page.bind("account", "sp"))
-	pair.add_sibling(account_button)
+	account_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Pilot Profile + Report a Problem share the last row.
+	var pair2 := HBoxContainer.new()
+	pair2.add_theme_constant_override("separation", 8)
+	pair.add_sibling(pair2)
+	pair2.add_child(account_button)
+	var report := Button.new()
+	report.text = "Report"
+	report.tooltip_text = "Report a bug, a player or an idea"
+	report.custom_minimum_size = Vector2(110, 46)
+	report.add_theme_font_size_override("font_size", 20)
+	report.pressed.connect(_open_profile_page.bind("report", "sp"))
+	pair2.add_child(report)
 
 	# Single Player / Multiplayer each open a sub-menu: Launch (or Race), Hangar, Shop.
 	mode_menu = settings.duplicate(0)
@@ -2445,7 +2459,11 @@ func _open_profile_page(page: String, track := "sp") -> void:
 
 ## Leaving Hangar / Shop goes back to that mode's sub-menu; other pages to the main menu.
 func _on_profile_closed() -> void:
-	if _menu_track != "" and Profile.mode != "":
+	if Profile.mode == "":
+		_show_menu()
+		_open_profile_page("account", "sp")  # logged out / account deleted: back to the login screen
+		return
+	if _menu_track != "":
 		_open_mode_menu(_menu_track)
 	else:
 		_show_menu()
@@ -2639,6 +2657,7 @@ func _resume() -> void:
 
 func _open_settings_from_pause() -> void:
 	_settings_from_pause = true
+	delete_button.visible = false
 	pause_screen.visible = false
 	settings.visible = true
 	back_button.grab_focus()
@@ -2691,6 +2710,23 @@ func _make_settings_extras() -> void:
 	tips.text = "Ship computer tips"
 	tips.custom_minimum_size = Vector2(300, 56)
 	tips.button_pressed = tips_enabled
+	# Delete Account (accounts only, not while paused mid-run).
+	delete_button = Button.new()
+	delete_button.text = "Delete Account"
+	delete_button.custom_minimum_size = Vector2(300, 46)
+	delete_button.add_theme_color_override("font_color", Color(1, 0.55, 0.45))
+	delete_button.pressed.connect(func() -> void:
+		settings.visible = false
+		_open_profile_page("delete", "sp"))
+	vbox.add_child(delete_button)
+	vbox.move_child(delete_button, back_button.get_index())
+	# Lots of rows now: make them compact so Settings fits short (landscape) screens.
+	vbox.add_theme_constant_override("separation", 6)
+	(vbox.get_child(0) as Label).add_theme_font_size_override("font_size", 34)
+	for child in vbox.get_children():
+		if child is Control and (child as Control).custom_minimum_size.y > 40.0:
+			(child as Control).custom_minimum_size.y = 40.0
+	difficulty_option.custom_minimum_size.y = 40.0
 	tips.toggled.connect(func(on: bool) -> void:
 		tips_enabled = on
 		_save())

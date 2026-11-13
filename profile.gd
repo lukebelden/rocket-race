@@ -23,6 +23,8 @@ var catalog: Dictionary = {}
 var mode: String = ""
 var token: String = ""
 var username: String = ""
+## Account email (for password resets).
+var email: String = ""
 ## {character, sp: track, mp: track, stats}; track = {xp, credits, owned: {ships, mods, designs},
 ## loadout: {ship, design, mods}}
 var data: Dictionary = {}
@@ -296,15 +298,17 @@ func set_character(id: String) -> void:
 
 
 ## Returns "" on success or an error message. Signing up keeps your guest progress.
-func signup(user: String, password: String) -> String:
+## The email is used for password resets.
+func signup(user: String, password: String, mail: String) -> String:
 	var guest := data.duplicate(true) if is_guest() else {}
-	var res := await _api("POST", "/api/signup", {"username": user, "password": password, "guest": guest}, false)
+	var res := await _api("POST", "/api/signup", {"username": user, "password": password, "email": mail, "guest": guest}, false)
 	var err := _logged_in(res)
 	if err == "":
 		needs_pilot_pick = true
 	return err
 
 
+## Log in with a username or the account's email.
 func login(user: String, password: String) -> String:
 	var res := await _api("POST", "/api/login", {"username": user, "password": password}, false)
 	return _logged_in(res)
@@ -313,12 +317,68 @@ func login(user: String, password: String) -> String:
 func logout() -> void:
 	if is_account():
 		_api("POST", "/api/logout", {})
+	_forget_login()
+
+
+func _forget_login() -> void:
 	mode = ""
 	token = ""
 	username = ""
+	email = ""
 	data = new_profile()
 	_save()
 	changed.emit()
+
+
+# --- Account security --------------------------------------------------------------------
+
+## Email a 6-digit reset code to the account (username or email). The server answers the
+## same whether or not the account exists. Returns "" or an error (e.g. too many tries).
+func forgot_password(login_name: String) -> String:
+	var res := await _api("POST", "/api/forgot", {"login": login_name}, false)
+	return str(res.get("error", ""))
+
+
+## Set a new password with the emailed code; logs you in. Returns "" or an error.
+func reset_password(login_name: String, code: String, password: String) -> String:
+	var res := await _api("POST", "/api/reset", {"login": login_name, "code": code, "password": password}, false)
+	return _logged_in(res)
+
+
+## Other devices get signed out; this one stays logged in. Returns "" or an error.
+func change_password(current: String, password: String) -> String:
+	var res := await _api("POST", "/api/account/password", {"current": current, "password": password})
+	if res.has("error"):
+		return str(res["error"])
+	token = str(res.get("token", token))
+	_apply_server_profile(res["profile"])
+	return ""
+
+
+func change_email(password: String, mail: String) -> String:
+	var res := await _api("POST", "/api/account/email", {"password": password, "email": mail})
+	if res.has("error"):
+		return str(res["error"])
+	_apply_server_profile(res["profile"])
+	return ""
+
+
+## Deletes the account for good (needs the password), then logs out. Returns "" or an error.
+func delete_account(password: String) -> String:
+	var res := await _api("POST", "/api/account/delete", {"password": password})
+	if res.has("error"):
+		return str(res["error"])
+	_forget_login()
+	return ""
+
+
+## Problem report: category "bug", "player", "suggestion" or "other". Guests can report too.
+func send_report(category: String, message: String, target: String) -> String:
+	var platform := "%s %s · %dx%d" % [OS.get_name(), "web" if OS.has_feature("web") else "app",
+		DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]
+	var res := await _api("POST", "/api/report", {"category": category, "message": message,
+		"target": target, "platform": platform}, is_account())
+	return str(res.get("error", ""))
 
 
 ## Re-fetch the account (on startup). Returns false if the saved login has expired.
@@ -351,6 +411,7 @@ func _logged_in(res: Dictionary) -> String:
 
 func _apply_server_profile(profile: Dictionary) -> void:
 	username = str(profile.get("username", username))
+	email = str(profile.get("email", email))
 	data = _clean_profile(profile)
 	_save()
 	changed.emit()
@@ -402,6 +463,7 @@ func _load() -> void:
 	mode = str(cfg.get_value("profile", "mode", ""))
 	token = str(cfg.get_value("profile", "token", ""))
 	username = str(cfg.get_value("profile", "username", ""))
+	email = str(cfg.get_value("profile", "email", ""))
 	var saved = cfg.get_value("profile", "data", {})
 	if saved is Dictionary:
 		data = _clean_profile(saved)
@@ -414,5 +476,6 @@ func _save() -> void:
 	cfg.set_value("profile", "mode", mode)
 	cfg.set_value("profile", "token", token)
 	cfg.set_value("profile", "username", username)
+	cfg.set_value("profile", "email", email)
 	cfg.set_value("profile", "data", data)
 	cfg.save(SAVE_PATH)

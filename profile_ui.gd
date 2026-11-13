@@ -27,6 +27,11 @@ var _pick: String = ""
 var _shop_tab: String = "ships"
 var _user_edit: LineEdit
 var _pass_edit: LineEdit
+var _mail_edit: LineEdit
+# Password reset / report state
+var _reset_login := ""
+var _reset_sent := false
+var _report_cat := "bug"
 var _busy := false
 ## Keep the scroll position when a page re-renders after a pick/purchase.
 var _scroll_box: ScrollContainer
@@ -43,7 +48,7 @@ func setup(template: Control) -> void:
 		box.remove_child(child)
 		child.free()
 	Profile.changed.connect(func() -> void:
-		if screen.visible and not _busy and _page != "account":
+		if screen.visible and not _busy and _page in ["hangar", "shop", "pick"]:
 			_render())
 
 
@@ -73,6 +78,11 @@ func _render() -> void:
 		"hangar": _render_hangar()
 		"shop": _render_shop()
 		"pick": _render_pick()
+		"forgot": _render_forgot()
+		"email": _render_email()
+		"password": _render_password()
+		"delete": _render_delete()
+		"report": _render_report()
 
 
 # --- Little builders -------------------------------------------------------------------
@@ -237,6 +247,20 @@ func _xp_bar(parent: Control, title: String, xp: int) -> void:
 
 # --- Account -----------------------------------------------------------------------------
 
+## A labelled text field in a row. secret = password dots.
+func _field(label: String, placeholder: String, secret := false, max_len := 64, parent: Control = null) -> LineEdit:
+	var r := _row(parent)
+	_label(label, 17, SOFT, r).custom_minimum_size.x = 150
+	var e := LineEdit.new()
+	e.secret = secret
+	e.max_length = max_len
+	e.placeholder_text = placeholder
+	e.add_theme_font_size_override("font_size", 17)
+	e.custom_minimum_size = Vector2(270, 40)
+	r.add_child(e)
+	return e
+
+
 func _render_account() -> void:
 	if Profile.is_account():
 		_label("PILOT PROFILE", 40, GOLD)
@@ -244,45 +268,44 @@ func _render_account() -> void:
 		var av := _avatar(Profile.character())
 		av.custom_minimum_size = Vector2(70, 70)
 		top.add_child(av)
-		_label(Profile.username, 30, Color(0.55, 0.85, 1), top)
+		var names := VBoxContainer.new()
+		names.custom_minimum_size.x = 360  # give the name/email room (a column inside a row gets no width otherwise)
+		top.add_child(names)
+		_label(Profile.username, 28, Color(0.55, 0.85, 1), names, false)
+		_label(Profile.email if Profile.email != "" else "No email set (needed to reset your password)", 14,
+			DIM if Profile.email != "" else BAD, names, false)
 		_xp_bar(box, "Single Player", int(Profile.data["sp"]["xp"]))
 		_xp_bar(box, "Multiplayer", int(Profile.data["mp"]["xp"]))
 		var st: Dictionary = Profile.data["stats"]
-		_label("Single Player: %d cr · best %d · %d runs" % [Profile.credits("sp"), int(st["sp_best"]), int(st["sp_runs"])], 16, SOFT)
+		_label("Single Player: %d cr · best %d · %d runs" % [Profile.credits("sp"), int(st["sp_best"]), int(st["sp_runs"])], 15, SOFT)
 		_label("Multiplayer: %d cr · %d wins / %d races · best %d" % [Profile.credits("mp"), int(st["mp_wins"]),
-			int(st["mp_races"]), int(st["mp_best"])], 16, SOFT)
-		_button("Change Pilot", func() -> void: open("pick"))
+			int(st["mp_races"]), int(st["mp_best"])], 15, SOFT)
+		var r1 := _row()
+		_button("Change Pilot", func() -> void: open("pick"), r1, 190)
+		_button("Change Email", func() -> void: open("email"), r1, 190)
+		_button("Change Password", func() -> void: open("password"), r1, 190)
 		status = _label("", 15, SOFT)
+		var r2 := _row()
 		_button("Log Out", func() -> void:
 			Profile.logout()
-			_render())
-		_button("Back", close).grab_focus()
+			_render(), r2, 190)
+		_button("Back", close, r2, 190).grab_focus()
 		return
 
 	_label("PILOT LOGIN", 40, GOLD)
 	_label("Sign up to save your progress online and race friends in Multiplayer." +
 		("\nYour guest progress comes with you." if Profile.is_guest() else ""), 15, SOFT).custom_minimum_size.x = 440
-	var r1 := _row()
-	_label("Username", 18, SOFT, r1).custom_minimum_size.x = 110
-	_user_edit = LineEdit.new()
-	_user_edit.max_length = 16
-	_user_edit.add_theme_font_size_override("font_size", 18)
-	_user_edit.custom_minimum_size = Vector2(240, 42)
-	_user_edit.placeholder_text = "3-16 letters/numbers"
-	r1.add_child(_user_edit)
-	var r2 := _row()
-	_label("Password", 18, SOFT, r2).custom_minimum_size.x = 110
-	_pass_edit = LineEdit.new()
-	_pass_edit.secret = true
-	_pass_edit.add_theme_font_size_override("font_size", 18)
-	_pass_edit.max_length = 128
-	_pass_edit.custom_minimum_size = Vector2(240, 42)
-	_pass_edit.placeholder_text = "at least 6 characters"
+	_user_edit = _field("Username", "or email to log in", false, 64)
+	_pass_edit = _field("Password", "at least 8 characters", true, 128)
 	_pass_edit.text_submitted.connect(func(_t: String) -> void: _do_login(false))
-	r2.add_child(_pass_edit)
+	_mail_edit = _field("Email", "sign up only: for password resets", false, 120)
 	var r3 := _row()
 	_button("Log In", _do_login.bind(false), r3, 150)
 	_button("Sign Up", _do_login.bind(true), r3, 150)
+	_button("Forgot password?", func() -> void:
+		_reset_login = _user_edit.text.strip_edges()
+		_reset_sent = false
+		open("forgot"), r3, 190)
 	status = _label("", 15, SOFT)
 	_label("Guests can play Single Player only (progress saved on this device).", 13, DIM)
 	if Profile.is_guest():
@@ -302,11 +325,14 @@ func _do_login(is_signup: bool) -> void:
 	if user == "" or password == "":
 		_set_status("Enter a username and password.", BAD)
 		return
+	if is_signup and _mail_edit.text.strip_edges() == "":
+		_set_status("Add an email so you can reset your password if you forget it.", BAD)
+		return
 	_busy = true
 	_set_status("Signing up…" if is_signup else "Logging in…", Color(0.9, 0.85, 0.5))
 	var err: String
 	if is_signup:
-		err = await Profile.signup(user, password)
+		err = await Profile.signup(user, password, _mail_edit.text.strip_edges())
 	else:
 		err = await Profile.login(user, password)
 	_busy = false
@@ -319,6 +345,181 @@ func _do_login(is_signup: bool) -> void:
 		open("pick")  # new account: choose your pilot before flying
 	else:
 		close()
+
+
+## Forgotten password: 1) email me a code, 2) type the code + a new password.
+func _render_forgot() -> void:
+	_label("RESET PASSWORD", 38, GOLD)
+	if not _reset_sent:
+		_label("Enter your username or email. We'll email you a 6-digit code.", 16, SOFT)
+		var who := _field("Username / email", "", false, 120)
+		who.text = _reset_login
+		status = _label("", 15, SOFT)
+		var r := _row()
+		_button("Send Code", func() -> void:
+			if _busy or who.text.strip_edges() == "":
+				return
+			_busy = true
+			_set_status("Sending…", Color(0.9, 0.85, 0.5))
+			var err: String = await Profile.forgot_password(who.text.strip_edges())
+			_busy = false
+			if err != "":
+				_set_status(err, BAD)
+				return
+			_reset_login = who.text.strip_edges()
+			_reset_sent = true
+			_render(), r, 190)
+		_button("Back", func() -> void: open("account"), r, 150)
+		who.grab_focus()
+		return
+	_label("If that account has an email, a code is on its way (it works for 15 minutes).\nCheck your spam folder too.", 15, SOFT)
+	var code := _field("Code", "6 digits", false, 6)
+	var pw := _field("New password", "at least 8 characters", true, 128)
+	var pw2 := _field("Repeat password", "", true, 128)
+	status = _label("", 15, SOFT)
+	var r2 := _row()
+	_button("Reset Password", func() -> void:
+		if _busy:
+			return
+		if pw.text != pw2.text:
+			_set_status("The passwords don't match.", BAD)
+			return
+		_busy = true
+		_set_status("Resetting…", Color(0.9, 0.85, 0.5))
+		var err: String = await Profile.reset_password(_reset_login, code.text.strip_edges(), pw.text)
+		_busy = false
+		if err != "":
+			_set_status(err, BAD)
+			return
+		close(), r2, 190)
+	_button("Send a New Code", func() -> void:
+		_reset_sent = false
+		_render(), r2, 190)
+	_button("Back", func() -> void: open("account"), r2, 120)
+	code.grab_focus()
+
+
+func _render_email() -> void:
+	_label("CHANGE EMAIL", 38, GOLD)
+	_label("Current: " + (Profile.email if Profile.email != "" else "none"), 16, SOFT)
+	var mail := _field("New email", "", false, 120)
+	var pw := _field("Password", "to confirm it's you", true, 128)
+	status = _label("", 15, SOFT)
+	var r := _row()
+	_button("Save Email", func() -> void:
+		if _busy:
+			return
+		_busy = true
+		var err: String = await Profile.change_email(pw.text, mail.text.strip_edges())
+		_busy = false
+		if err != "":
+			_set_status(err, BAD)
+			return
+		open("account")
+		_set_status("Email updated.", GOOD), r, 190)
+	_button("Back", func() -> void: open("account"), r, 150)
+	mail.grab_focus()
+
+
+func _render_password() -> void:
+	_label("CHANGE PASSWORD", 38, GOLD)
+	_label("Other devices logged in to this account will be signed out.", 15, SOFT)
+	var cur := _field("Current password", "", true, 128)
+	var pw := _field("New password", "at least 8 characters", true, 128)
+	var pw2 := _field("Repeat new", "", true, 128)
+	status = _label("", 15, SOFT)
+	var r := _row()
+	_button("Save Password", func() -> void:
+		if _busy:
+			return
+		if pw.text != pw2.text:
+			_set_status("The new passwords don't match.", BAD)
+			return
+		_busy = true
+		var err: String = await Profile.change_password(cur.text, pw.text)
+		_busy = false
+		if err != "":
+			_set_status(err, BAD)
+			return
+		open("account")
+		_set_status("Password changed.", GOOD), r, 190)
+	_button("Back", func() -> void: open("account"), r, 150)
+	cur.grab_focus()
+
+
+## Opened from Settings. Needs the password; can't be undone.
+func _render_delete() -> void:
+	_label("DELETE ACCOUNT", 38, BAD)
+	_label("This permanently deletes %s: both levels, credits, ships, mods, paint jobs and race stats.\nIt can't be undone." % Profile.username, 16, SOFT).custom_minimum_size.x = 460
+	var pw := _field("Password", "to confirm", true, 128)
+	var confirm := _field("Type DELETE", "", false, 6)
+	status = _label("", 15, SOFT)
+	var r := _row()
+	var del := _button("Delete Forever", func() -> void:
+		if _busy:
+			return
+		if confirm.text.strip_edges().to_upper() != "DELETE":
+			_set_status("Type DELETE to confirm.", BAD)
+			return
+		_busy = true
+		_set_status("Deleting…", Color(0.9, 0.85, 0.5))
+		var err: String = await Profile.delete_account(pw.text)
+		_busy = false
+		if err != "":
+			_set_status(err, BAD)
+			return
+		open("account")
+		_set_status("Your account has been deleted.", GOOD), r, 190)
+	del.add_theme_color_override("font_color", BAD)
+	_button("Cancel", close, r, 150).grab_focus()
+
+
+## Report a bug, a player, an idea... Stored on the server for the developer to read.
+func _render_report() -> void:
+	_label("REPORT A PROBLEM", 38, GOLD)
+	var cats := _row(null, 8)
+	for spec in [["bug", "Bug"], ["player", "Player"], ["suggestion", "Idea"], ["other", "Other"]]:
+		var b := _button(spec[1], func() -> void:
+			_report_cat = spec[0]
+			_render(), cats, 120)
+		b.toggle_mode = true
+		b.button_pressed = _report_cat == spec[0]
+	var hint: String = {
+		"bug": "What happened, and what were you doing? (level, mode, screen…)",
+		"player": "Which player, and what did they do?",
+		"suggestion": "What would make the game better?",
+		"other": "Tell us what's on your mind.",
+	}[_report_cat]
+	_label(hint, 15, SOFT)
+	var target: LineEdit = null
+	if _report_cat == "player":
+		target = _field("Player name", "their username", false, 40)
+	var msg := TextEdit.new()
+	msg.custom_minimum_size = Vector2(520, 130)
+	msg.add_theme_font_size_override("font_size", 16)
+	msg.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	msg.placeholder_text = "Describe it here…"
+	box.add_child(msg)
+	status = _label("Sent as %s." % (Profile.username if Profile.is_account() else "a guest"), 13, DIM)
+	var r := _row()
+	_button("Send Report", func() -> void:
+		if _busy:
+			return
+		if msg.text.strip_edges().length() < 5:
+			_set_status("Please describe it in a few words.", BAD)
+			return
+		_busy = true
+		_set_status("Sending…", Color(0.9, 0.85, 0.5))
+		var err: String = await Profile.send_report(_report_cat, msg.text.strip_edges(),
+			target.text.strip_edges() if target else "")
+		_busy = false
+		if err != "":
+			_set_status(err, BAD)
+			return
+		msg.text = ""
+		_set_status("Thanks! Your report was sent.", GOOD), r, 190)
+	_button("Back", close, r, 150)
+	msg.grab_focus()
 
 
 # --- Hangar: pilot, ship, paint, fitted mods ---------------------------------------------

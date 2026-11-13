@@ -4,3 +4,6 @@
 
 # Multiplayer server dependencies
 server/node_modules/
+
+# Secrets (SMTP password etc.)
+.env
