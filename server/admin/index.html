@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Rocket Race Tickets</title>
+  <link rel="stylesheet" href="/admin/style.css">
+</head>
+<body>
+  <!-- Login -->
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="card">
+      <h1>Rocket Race <span>Tickets</span></h1>
+      <p class="muted">Log in with an admin game account.</p>
+      <label>Username or email <input id="login-user" autocomplete="username" required></label>
+      <label>Password <input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary">Log in</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </main>
+
+  <!-- Tickets -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <h1>Rocket Race <span>Tickets</span></h1>
+      <div class="who"><span id="who"></span><button id="logout" class="ghost">Log out</button></div>
+    </header>
+
+    <nav class="tabs" id="status-tabs" aria-label="Ticket status"></nav>
+
+    <div class="filters">
+      <select id="category" aria-label="Category">
+        <option value="all">All categories</option>
+        <option value="bug">Bugs</option>
+        <option value="player">Player reports</option>
+        <option value="suggestion">Ideas</option>
+        <option value="other">Other</option>
+      </select>
+      <input id="search" type="search" placeholder="Search text, player or #id" aria-label="Search">
+      <span id="refreshed" class="muted"></span>
+    </div>
+
+    <div class="layout">
+      <section class="list" aria-label="Tickets">
+        <ul id="tickets"></ul>
+        <p id="empty" class="muted empty" hidden>No tickets here.</p>
+      </section>
+
+      <section id="detail" class="detail" aria-label="Ticket details">
+        <p class="muted placeholder">Pick a ticket to see it here.</p>
+      </section>
+    </div>
+  </div>
+
+  <template id="ticket-row">
+    <li><button class="row">
+      <span class="row-top"><span class="id"></span><span class="cat"></span><span class="status"></span><span class="when muted"></span></span>
+      <span class="preview"></span>
+      <span class="row-bottom muted"><span class="from"></span><span class="notes"></span></span>
+    </button></li>
+  </template>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

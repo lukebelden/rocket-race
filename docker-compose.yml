@@ -8,7 +8,9 @@
 #   docker compose up -d --build
 # Then put HTTPS in front (e.g. Caddy) so browsers can use wss:// - see the README notes.
 #
-# Read player reports:   docker compose exec game node server/reports.js
+# Tickets (player reports): open https://<your-domain>/admin and log in with an admin
+# game account. Make an account an admin with:
+#   docker compose exec game node server/admins.js add <username>
 #
 # Back up the database now and then:
 #   docker compose cp game:/data/rocket-race.db ./rocket-race-backup.db

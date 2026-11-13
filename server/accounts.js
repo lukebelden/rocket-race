@@ -58,6 +58,26 @@ if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "email"
   db.exec("ALTER TABLE users ADD COLUMN email TEXT COLLATE NOCASE");
 }
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email) WHERE email IS NOT NULL");
+// Admins (for the /admin ticket page) and ticket tracking.
+const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+if (!hasColumn("users", "is_admin")) db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+if (!hasColumn("reports", "updated_at")) db.exec("ALTER TABLE reports ADD COLUMN updated_at INTEGER");
+db.exec(`
+  UPDATE reports SET status = 'resolved' WHERE status = 'done';
+  UPDATE reports SET updated_at = created_at WHERE updated_at IS NULL;
+  CREATE TABLE IF NOT EXISTS report_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER NOT NULL,
+    author TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+`);
 
 for (const row of db.prepare("SELECT id, profile FROM users").all()) {
   let data = {};
@@ -200,6 +220,7 @@ function setPassword(userId, password) {
   const salt = crypto.randomBytes(16).toString("hex");
   db.prepare("UPDATE users SET pass_hash = ?, salt = ? WHERE id = ?").run(hashPassword(String(password), salt), salt, userId);
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);  // sign out everywhere
+  db.prepare("DELETE FROM admin_sessions WHERE user_id = ?").run(userId);
   db.prepare("DELETE FROM reset_codes WHERE user_id = ?").run(userId);
   failedLogins.delete(userId);
 }
@@ -229,6 +250,7 @@ function deleteAccount(user, password) {
   if (!passwordMatches(rowFor(user), password)) return { error: "Wrong password." };
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
   db.prepare("DELETE FROM reset_codes WHERE user_id = ?").run(user.id);
+  db.prepare("DELETE FROM admin_sessions WHERE user_id = ?").run(user.id);
   db.prepare("UPDATE reports SET user_id = NULL WHERE user_id = ?").run(user.id);
   db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
   failedLogins.delete(user.id);
@@ -284,12 +306,137 @@ function addReport({ user, category, target, message, platform }) {
   return { id: Number(info.lastInsertRowid), category };
 }
 
+// --- Tickets (admin page) --------------------------------------------------------------
+
+const TICKET_STATUSES = ["new", "open", "in_progress", "resolved"];
+
 function listReports(status = "new", limit = 100) {
   return db.prepare("SELECT * FROM reports WHERE (? = 'all' OR status = ?) ORDER BY id DESC LIMIT ?").all(status, status, limit);
 }
 
+/** Tickets for the admin list, newest first, with filters and per-status counts. */
+function listTickets({ status = "all", category = "all", q = "", limit = 200 } = {}) {
+  const where = [];
+  const args = [];
+  if (TICKET_STATUSES.includes(status)) { where.push("status = ?"); args.push(status); }
+  if (REPORT_CATEGORIES.includes(category)) { where.push("category = ?"); args.push(category); }
+  if (q) {
+    where.push("(message LIKE ? OR username LIKE ? OR target LIKE ? OR CAST(id AS TEXT) = ?)");
+    const like = "%" + String(q).slice(0, 80) + "%";
+    args.push(like, like, like, String(q).replace(/^#/, ""));
+  }
+  const sql = "SELECT id, created_at, updated_at, username, category, target, status, substr(message, 1, 140) AS preview," +
+    " (SELECT COUNT(*) FROM report_notes n WHERE n.report_id = reports.id) AS notes FROM reports" +
+    (where.length ? " WHERE " + where.join(" AND ") : "") + " ORDER BY id DESC LIMIT ?";
+  const rows = db.prepare(sql).all(...args, Math.min(Number(limit) || 200, 500));
+  const counts = { all: 0 };
+  for (const st of TICKET_STATUSES) counts[st] = 0;
+  for (const r of db.prepare("SELECT status, COUNT(*) AS n FROM reports GROUP BY status").all()) {
+    counts[r.status] = r.n;
+    counts.all += r.n;
+  }
+  return { rows, counts };
+}
+
+function accountSummary(name) {
+  if (!name) return null;
+  const u = db.prepare("SELECT id, username, email, created_at, is_admin, profile FROM users WHERE username = ?").get(name);
+  if (!u) return { username: name, exists: false };
+  const p = loadProfile(u);
+  return {
+    username: u.username, exists: true, email: u.email || "", created_at: u.created_at, admin: !!u.is_admin,
+    sp_level: progress.levelInfo(p.sp.xp).level, mp_level: progress.levelInfo(p.mp.xp).level, races: p.stats.mp_races,
+    reports_sent: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE username = ?").get(u.username).n,
+    reported_times: db.prepare("SELECT COUNT(*) AS n FROM reports WHERE target = ? COLLATE NOCASE").get(u.username).n,
+  };
+}
+
+/** One ticket with its notes, plus info on the reporter and (player reports) the reported player. */
+function getTicket(id) {
+  const t = db.prepare("SELECT * FROM reports WHERE id = ?").get(Number(id));
+  if (!t) return null;
+  t.notes = db.prepare("SELECT author, text, created_at FROM report_notes WHERE report_id = ? ORDER BY id").all(t.id);
+  t.reporter = t.username === "guest" ? null : accountSummary(t.username);
+  t.target_account = t.target ? accountSummary(t.target) : null;
+  return t;
+}
+
+function setTicketStatus(id, status, author) {
+  if (!TICKET_STATUSES.includes(status)) return { error: "Unknown status." };
+  const t = db.prepare("SELECT status FROM reports WHERE id = ?").get(Number(id));
+  if (!t) return { error: "No such ticket." };
+  if (t.status === status) return {};
+  db.prepare("UPDATE reports SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), Number(id));
+  addTicketNote(id, author, `Status: ${t.status.replace("_", " ")} → ${status.replace("_", " ")}`, true);
+  return {};
+}
+
+/** Private note on a ticket (only admins see these). system = automatic status-change note. */
+function addTicketNote(id, author, text, system = false) {
+  text = String(text || "").trim().slice(0, 2000);
+  if (!text) return { error: "Write a note first." };
+  if (!db.prepare("SELECT 1 FROM reports WHERE id = ?").get(Number(id))) return { error: "No such ticket." };
+  db.prepare("INSERT INTO report_notes (report_id, author, text, created_at) VALUES (?, ?, ?, ?)")
+    .run(Number(id), system ? "system" : String(author), system ? `${text} (by ${author})` : text, Date.now());
+  db.prepare("UPDATE reports SET updated_at = ? WHERE id = ?").run(Date.now(), Number(id));
+  return {};
+}
+
+/** Used by the reports.js command. */
 function setReportStatus(id, status) {
-  db.prepare("UPDATE reports SET status = ? WHERE id = ?").run(String(status), Number(id));
+  return setTicketStatus(id, status === "done" ? "resolved" : status, "console");
+}
+
+// --- Admins ------------------------------------------------------------------------------
+
+const ADMIN_SESSION_MS = 12 * 3600 * 1000;
+const sha = (v) => crypto.createHash("sha256").update(String(v)).digest("hex");
+
+function setAdmin(username, on) {
+  const r = db.prepare("UPDATE users SET is_admin = ? WHERE username = ?").run(on ? 1 : 0, String(username));
+  if (!on) {
+    const u = db.prepare("SELECT id FROM users WHERE username = ?").get(String(username));
+    if (u) db.prepare("DELETE FROM admin_sessions WHERE user_id = ?").run(u.id);
+  }
+  return r.changes > 0;
+}
+
+function listAdmins() {
+  return db.prepare("SELECT username, email FROM users WHERE is_admin = 1 ORDER BY username").all();
+}
+
+/** Admin page login (a game account with the admin flag). Same lockout as the game. */
+function adminLogin(name, password) {
+  name = String(name || "").trim();
+  const row = db.prepare("SELECT * FROM users WHERE username = ? OR email = ?").get(name, name.toLowerCase());
+  const generic = { error: "Wrong username or password, or not an admin." };
+  if (!row) return generic;
+  if (locked(row.id)) return { error: "Too many wrong passwords. This account is locked for 15 minutes." };
+  if (!passwordMatches(row, password)) {
+    noteFailure(row.id);
+    return generic;
+  }
+  if (!row.is_admin) return generic;
+  failedLogins.delete(row.id);
+  const token = crypto.randomBytes(32).toString("hex");
+  // Only a hash of the cookie is stored, so a copy of the database can't be used to log in.
+  db.prepare("INSERT INTO admin_sessions (token_hash, user_id, created_at) VALUES (?, ?, ?)").run(sha(token), row.id, Date.now());
+  return { token, username: row.username };
+}
+
+function adminForToken(token) {
+  if (!token) return null;
+  const row = db.prepare(`SELECT u.id, u.username, u.is_admin, s.created_at FROM admin_sessions s
+      JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`).get(sha(token));
+  if (!row || !row.is_admin || Date.now() - row.created_at > ADMIN_SESSION_MS) {
+    if (row) db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha(token));
+    return null;
+  }
+  return { id: row.id, username: row.username };
+}
+
+function adminLogout(token) {
+  db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha(token || ""));
 }
 
 /** Top pilots. sp: best single-player score. mp: win rate (at least MIN_RACES races), then best race score. */
@@ -319,4 +466,6 @@ module.exports = {
   signup, login, logout, userForToken, save, view, leaderboard, MIN_RACES,
   changePassword, changeEmail, deleteAccount, startReset, finishReset,
   addReport, listReports, setReportStatus, REPORT_CATEGORIES,
+  TICKET_STATUSES, listTickets, getTicket, setTicketStatus, addTicketNote,
+  setAdmin, listAdmins, adminLogin, adminForToken, adminLogout, ADMIN_SESSION_MS,
 };

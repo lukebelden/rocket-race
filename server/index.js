@@ -45,6 +45,7 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".json": "application/json",
+  ".css": "text/css; charset=utf-8",
 };
 
 function serveStatic(req, res) {
@@ -246,6 +247,101 @@ async function handleApi(req, res, url) {
         return json(res, 200, { ok: true });
       }
       return json(res, 200, { token: result.token || token, profile: accounts.view(user) });
+    }
+    return json(res, 404, { error: "Unknown request." });
+  } catch (err) {
+    console.error(err);
+    return json(res, 500, { error: "Server error." });
+  }
+}
+
+// --- Admin ticket page (/admin) -----------------------------------------------------------
+// Admins log in with their game account (flag set with: node admins.js add <username>).
+// The session lives in an HttpOnly, SameSite=Strict cookie that page scripts can't read;
+// every change also needs the X-Admin header, which other websites can't send.
+//   POST /api/admin/login   {username, password}
+//   POST /api/admin/logout
+//   GET  /api/admin/me
+//   GET  /api/admin/tickets?status=&category=&q=
+//   GET  /api/admin/tickets/<id>
+//   POST /api/admin/tickets/<id>/status {status}
+//   POST /api/admin/tickets/<id>/notes  {text}
+
+const ADMIN_DIR = path.join(__dirname, "admin");
+const ADMIN_COOKIE = "rr_admin";
+const ADMIN_FILES = { "/admin": "index.html", "/admin/": "index.html", "/admin/app.js": "app.js", "/admin/style.css": "style.css" };
+
+function cookie(req, name) {
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return "";
+}
+
+function isHttps(req) {
+  return !!req.socket.encrypted || (process.env.TRUST_PROXY && req.headers["x-forwarded-proto"] === "https");
+}
+
+function serveAdminFile(req, res, url) {
+  const name = ADMIN_FILES[url.pathname];
+  const file = path.join(ADMIN_DIR, name);
+  fs.readFile(file, (err, data) => {
+    if (err) return res.writeHead(404).end("Not found");
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(file)] || "text/plain",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end(data);
+  });
+}
+
+async function handleAdminApi(req, res, url) {
+  const route = req.method + " " + url.pathname;
+  const token = cookie(req, ADMIN_COOKIE);
+  try {
+    if (req.method === "POST" && req.headers["x-admin"] !== "1") return json(res, 403, { error: "Missing header." });
+    if (route === "POST /api/admin/login") {
+      if (limited("admin-login", clientIp(req), 10, 15 * 60 * 1000)) return json(res, 429, SLOW);
+      const body = await readJson(req);
+      const result = accounts.adminLogin(body.username, body.password);
+      if (result.error) return json(res, 401, { error: result.error });
+      res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=${result.token}; HttpOnly; SameSite=Strict; Path=/; ` +
+        `Max-Age=${accounts.ADMIN_SESSION_MS / 1000}` + (isHttps(req) ? "; Secure" : ""));
+      console.log(`Admin login: ${result.username}`);
+      return json(res, 200, { username: result.username });
+    }
+    const admin = accounts.adminForToken(token);
+    if (!admin) return json(res, 401, { error: "Please log in." });
+    if (route === "POST /api/admin/logout") {
+      accounts.adminLogout(token);
+      res.setHeader("Set-Cookie", `${ADMIN_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+      return json(res, 200, { ok: true });
+    }
+    if (route === "GET /api/admin/me") return json(res, 200, { username: admin.username });
+    if (route === "GET /api/admin/tickets") {
+      const p = url.searchParams;
+      return json(res, 200, accounts.listTickets({ status: p.get("status") || "all", category: p.get("category") || "all", q: p.get("q") || "" }));
+    }
+    const m = url.pathname.match(/^\/api\/admin\/tickets\/(\d+)(\/status|\/notes)?$/);
+    if (m) {
+      const id = Number(m[1]);
+      if (req.method === "GET" && !m[2]) {
+        const t = accounts.getTicket(id);
+        return t ? json(res, 200, t) : json(res, 404, { error: "No such ticket." });
+      }
+      if (req.method === "POST" && m[2]) {
+        const body = await readJson(req);
+        const result = m[2] === "/status"
+          ? accounts.setTicketStatus(id, String(body.status), admin.username)
+          : accounts.addTicketNote(id, admin.username, body.text);
+        if (result.error) return json(res, 400, { error: result.error });
+        return json(res, 200, accounts.getTicket(id));
+      }
     }
     return json(res, 404, { error: "Unknown request." });
   } catch (err) {
@@ -491,6 +587,8 @@ function handle(client, msg) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
+  if (url.pathname.startsWith("/api/admin/")) return handleAdminApi(req, res, url);
+  if (ADMIN_FILES[url.pathname]) return serveAdminFile(req, res, url);
   if (url.pathname.startsWith("/api/")) return handleApi(req, res, url);
   serveStatic(req, res);
 });

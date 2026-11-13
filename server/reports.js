@@ -1,7 +1,8 @@
-// Read player problem reports from the database.
-//   node reports.js            new reports
-//   node reports.js all        every report
-//   node reports.js done 12    mark report #12 as handled
+// Read player problem reports (tickets) from the database. The admin page at /admin is
+// the easier way; this is handy over SSH.
+//   node reports.js            new tickets
+//   node reports.js all        every ticket
+//   node reports.js done 12    mark ticket #12 as resolved
 // (On the Droplet: docker compose exec game node server/reports.js)
 const accounts = require("./accounts");
 
