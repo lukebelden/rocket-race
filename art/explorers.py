@@ -415,7 +415,7 @@ def head_penguin():
 HEADS = {"duck": head_duck, "mouse": head_mouse, "dog": head_dog, "cat": head_cat, "bear": head_bear,
          "raccoon": head_raccoon, "monkey": head_monkey, "penguin": head_penguin}
 
-for animal in ANIMALS:
+for animal in (ANIMALS if __name__ == "__main__" else []):  # importable by toon.py
     reset()
     dome = explorer_suit(TRIM[animal])
     HEADS[animal]()
