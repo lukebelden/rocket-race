@@ -7,13 +7,16 @@
 // the server relays to the rest of the room. The server decides finishing order.
 //
 // Run locally:   cd server && npm install && npm start   ->  http://localhost:8080
-// Environment:   PORT (default 8080), STATIC_DIR (default ../build/web), MIN_PLAYERS (default 2)
+// Environment:   PORT (default 8080), STATIC_DIR (default ../build/web), MIN_PLAYERS (default 2),
+//                DATA_DIR (default server/data: the accounts database lives here - keep it backed up)
 
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
+const accounts = require("./accounts");
+const progress = require("./progress");
 
 const PORT = Number(process.env.PORT) || 8080;
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR || path.join(__dirname, "..", "build", "web"));
@@ -24,6 +27,9 @@ const COUNTDOWN_MS = 3000;
 const INTRO_MS = 3600;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I / O (look like 1 / 0)
 const COLORS = ["#4fc3ff", "#ff6b5e", "#7dff8a", "#ffd34d"];
+// Must match game.gd: LEVEL_DURATION (distance per level) and RACE_LEVELS.
+const LEVEL_DURATION = 26;
+const RACE_LEVELS = 5;
 
 // --- Static files ------------------------------------------------------------------------
 
@@ -44,6 +50,7 @@ function serveStatic(req, res) {
     return;
   }
   const url = new URL(req.url, "http://localhost");
+  if (url.pathname.startsWith("/api/")) return; // handled by handleApi
   if (url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
@@ -71,6 +78,96 @@ function serveStatic(req, res) {
     if (req.method === "HEAD") return res.end();
     fs.createReadStream(file).pipe(res);
   });
+}
+
+// --- Account API (JSON) ------------------------------------------------------------------
+//   POST /api/signup  {username, password, guest?}   -> {token, profile}
+//   POST /api/login   {username, password}           -> {token, profile}
+//   POST /api/logout                                  (Authorization: Bearer <token>)
+//   GET  /api/me                                      -> {profile}
+//   POST /api/run     {score, level}                  -> {profile, reward}   single-player run
+//   POST /api/buy     {kind: ships|mods|designs, id}  -> {profile}
+//   POST /api/loadout {character, ship, design, mods} -> {profile}
+
+const loginAttempts = new Map(); // ip -> {count, since}
+
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const a = loginAttempts.get(ip);
+  if (!a || now - a.since > 10 * 60 * 1000) {
+    loginAttempts.set(ip, { count: 1, since: now });
+    return false;
+  }
+  a.count++;
+  return a.count > 20;
+}
+
+function readJson(req) {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 16384) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(body || "{}"));
+      } catch {
+        resolve({});
+      }
+    });
+    req.on("error", () => resolve({}));
+  });
+}
+
+function json(res, status, data) {
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(data));
+}
+
+async function handleApi(req, res, url) {
+  const route = req.method + " " + url.pathname;
+  const token = String(req.headers.authorization || "").replace(/^Bearer /, "");
+  try {
+    if (route === "POST /api/signup" || route === "POST /api/login") {
+      const ip = req.socket.remoteAddress || "?";
+      if (tooManyAttempts(ip)) return json(res, 429, { error: "Too many tries. Wait a few minutes." });
+      const body = await readJson(req);
+      const result = route === "POST /api/signup"
+        ? accounts.signup(body.username, body.password, body.guest)
+        : accounts.login(body.username, body.password);
+      if (result.error) return json(res, 400, { error: result.error });
+      return json(res, 200, { token: result.token, profile: accounts.view(result.user) });
+    }
+    const user = accounts.userForToken(token);
+    if (!user) return json(res, 401, { error: "Please log in again." });
+    if (route === "POST /api/logout") {
+      accounts.logout(token);
+      return json(res, 200, { ok: true });
+    }
+    if (route === "GET /api/me") return json(res, 200, { profile: accounts.view(user) });
+    const body = await readJson(req);
+    if (route === "POST /api/run") {
+      const reward = progress.singleReward(user.profile, body.score, body.level);
+      accounts.save(user);
+      return json(res, 200, { profile: accounts.view(user), reward });
+    }
+    if (route === "POST /api/buy") {
+      const error = progress.buy(user.profile, String(body.kind), String(body.id));
+      if (error) return json(res, 400, { error });
+      accounts.save(user);
+      return json(res, 200, { profile: accounts.view(user) });
+    }
+    if (route === "POST /api/loadout") {
+      user.profile.loadout = progress.cleanLoadout(user.profile, body);
+      accounts.save(user);
+      return json(res, 200, { profile: accounts.view(user) });
+    }
+    return json(res, 404, { error: "Unknown request." });
+  } catch (err) {
+    console.error(err);
+    return json(res, 500, { error: "Server error." });
+  }
 }
 
 // --- Rooms -------------------------------------------------------------------------------
@@ -128,11 +225,12 @@ function freeColor(room) {
   return COLORS.find((c) => !used.has(c)) || COLORS[0];
 }
 
-function addPlayer(room, client, name) {
+function addPlayer(room, client) {
   const player = {
     id: client.id,
     ws: client.ws,
-    name: cleanName(name),
+    client,
+    name: cleanName(client.username),
     color: freeColor(room),
     status: "lobby",
     d: 0,
@@ -189,9 +287,29 @@ function checkRaceOver(room) {
     })
     .map((p, i) => ({ ...publicPlayer(p), rank: i + 1, status: p.status, d: p.d, score: p.score, timeMs: p.timeMs }));
   broadcast(room, { t: "results", ranking });
+  giveRaceRewards(room, ranking);
   room.phase = "lobby";
   for (const p of players) p.status = "lobby";
   sendRoom(room);
+}
+
+/** XP and credits for everyone in the race, saved to their accounts. */
+function giveRaceRewards(room, ranking) {
+  for (const row of ranking) {
+    const p = room.players.get(row.id);
+    if (!p || !p.client.token) continue;
+    const user = accounts.userForToken(p.client.token); // fresh copy (they may have shopped meanwhile)
+    if (!user) continue;
+    const reward = progress.raceReward(user.profile, {
+      score: row.score,
+      levelReached: Math.min(Math.floor(row.d / LEVEL_DURATION) + 1, RACE_LEVELS),
+      rank: row.rank,
+      finished: row.status === "finished",
+      racers: ranking.length,
+    });
+    accounts.save(user);
+    send(p.ws, { t: "reward", reward, profile: accounts.view(user) });
+  }
 }
 
 function num(v, min, max) {
@@ -203,15 +321,26 @@ function num(v, min, max) {
 function handle(client, msg) {
   const room = client.room;
   switch (msg.t) {
+    case "auth": {
+      // Multiplayer needs an account: the game sends its login token first.
+      const user = accounts.userForToken(msg.token);
+      if (!user) return send(client.ws, { t: "auth_failed", msg: "Log in to play multiplayer." });
+      client.token = msg.token;
+      client.username = user.username;
+      send(client.ws, { t: "auth_ok", username: user.username });
+      break;
+    }
     case "create": {
+      if (!client.token) return send(client.ws, { t: "error", msg: "Log in to play multiplayer." });
       if (room) leaveRoom(client);
       const code = newCode();
       const created = { code, hostId: client.id, phase: "lobby", players: new Map(), raceStart: 0, finishCount: 0 };
       rooms.set(code, created);
-      addPlayer(created, client, msg.name);
+      addPlayer(created, client);
       break;
     }
     case "join": {
+      if (!client.token) return send(client.ws, { t: "error", msg: "Log in to play multiplayer." });
       const code = String(msg.code || "").toUpperCase().trim();
       const target = rooms.get(code);
       if (!target) return send(client.ws, { t: "error", msg: `No room called ${code || "?"}. Check the code.` });
@@ -219,7 +348,7 @@ function handle(client, msg) {
       if (target.players.size >= MAX_PLAYERS) return send(client.ws, { t: "error", msg: "That room is full." });
       if (target.phase !== "lobby") return send(client.ws, { t: "error", msg: "That race has already started. Try again when it ends." });
       if (room) leaveRoom(client);
-      addPlayer(target, client, msg.name);
+      addPlayer(target, client);
       break;
     }
     case "leave":
@@ -271,7 +400,11 @@ function handle(client, msg) {
 
 // --- Server ------------------------------------------------------------------------------
 
-const server = http.createServer(serveStatic);
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, "http://localhost");
+  if (url.pathname.startsWith("/api/")) return handleApi(req, res, url);
+  serveStatic(req, res);
+});
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 4096 });
 
 wss.on("connection", (ws) => {

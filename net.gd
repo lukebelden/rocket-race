@@ -108,6 +108,8 @@ func _process(_delta: float) -> void:
 		if not _was_open:
 			_was_open = true
 			_connecting = false
+			# Multiplayer needs an account: identify ourselves before anything else.
+			send({"t": "auth", "token": Profile.token})
 			connected.emit()
 		while _socket.get_available_packet_count() > 0:
 			# A race start reloads the game scene at the end of this frame. Leave any
@@ -135,6 +137,11 @@ func _on_packet(text: String) -> String:
 	match kind:
 		"hello":
 			my_id = int(msg.get("id", 0))
+		"auth_failed":
+			error.emit(str(msg.get("msg", "Log in to play multiplayer.")))
+		"reward":
+			if msg.get("reward") is Dictionary and msg.get("profile") is Dictionary:
+				Profile.apply_race_reward(msg["reward"], msg["profile"])
 		"room":
 			room = msg
 			my_id = int(msg.get("you", my_id))

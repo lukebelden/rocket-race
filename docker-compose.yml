@@ -1,0 +1,23 @@
+# Rocket Race on a DigitalOcean Droplet (NOT deployed yet).
+#
+# Why a Droplet: player accounts live in a SQLite file, and App Platform has no disk that
+# survives restarts. A $6/mo Droplet with Docker keeps it in the rocket-data volume below.
+#
+# On the Droplet (Ubuntu + Docker):
+#   git clone https://github.com/lukebelden/rocket-dodge.git && cd rocket-dodge
+#   docker compose up -d --build
+# Then put HTTPS in front (e.g. Caddy) so browsers can use wss:// - see the README notes.
+#
+# Back up the database now and then:
+#   docker compose cp game:/data/rocket-race.db ./rocket-race-backup.db
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - rocket-data:/data
+
+volumes:
+  rocket-data:

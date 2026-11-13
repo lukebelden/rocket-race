@@ -40,4 +40,5 @@ renderer/rendering_method.mobile="gl_compatibility"
 
 [autoload]
 
+Profile="*res://profile.gd"
 Net="*res://net.gd"

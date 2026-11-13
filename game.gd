@@ -10,6 +10,8 @@ const ScoreboardService := preload("res://scoreboard_service.gd")
 const ModInfo := preload("res://mods.gd")
 const ModIcon := preload("res://mod_icon.gd")
 const Rivals := preload("res://rivals.gd")
+const ProfileUI := preload("res://profile_ui.gd")
+const Animals := preload("res://animals.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -104,6 +106,13 @@ var _mp_code_edit: LineEdit
 var _mp_buttons: Array[Button] = []
 var _send_timer: float = 0.0
 var _shown_place: int = -1
+# Accounts / hangar / shop (profile.gd, profile_ui.gd)
+var profile_ui: Node
+var profile_label: Label
+var profile_avatar: Control
+var account_button: Button
+## Checked the saved login with the server once per game session.
+static var _profile_checked: bool = false
 
 var state: State = State.MENU
 var score: float = 0.0
@@ -131,6 +140,9 @@ var _tip_tween: Tween
 
 # Ship modifications (this run only). Two slots; "" = empty.
 var mods: Array[String] = ["", ""]
+## Ship type from the hangar (Scout / Cruiser / Hauler): side-to-side agility and damage taken.
+var ship_agility: float = 1.0
+var ship_damage: float = 1.0
 var hull_max: float = 1.0  # 1.0 = 100%; Reinforced Hull raises it
 var missile_ammo: int = 0
 var missile_cooldown: float = 0.0
@@ -286,6 +298,10 @@ func _ready() -> void:
 	add_child(rivals_node)
 	move_child(rivals_node, rocket.get_index())  # ghosts fly behind your own rocket
 	_make_multiplayer_ui()
+	_make_profile_ui()
+	_apply_loadout()
+	Profile.changed.connect(_on_profile_changed)
+	Profile.rewarded.connect(_on_profile_rewarded)
 	Net.room_updated.connect(_on_room_updated)
 	Net.error.connect(_on_net_error)
 	Net.connected.connect(_on_net_connected)
@@ -309,6 +325,9 @@ func _ready() -> void:
 		skip_menu = false
 		_show_menu()
 		_go_to_pad()
+	elif Profile.mode == "":
+		_show_menu()
+		_open_profile_page("account")  # first launch: log in, sign up or play as guest
 	else:
 		_show_menu()
 
@@ -400,6 +419,9 @@ func _show_menu() -> void:
 	rocket.active = false
 	rocket.flame_on = false
 	best_label.text = "Best: %d" % int(best_score)
+	_update_profile_line()
+	if profile_ui and profile_ui.screen:
+		profile_ui.screen.visible = false
 	score_label.visible = false
 	level_label.visible = false
 	dashboard.visible = false
@@ -709,7 +731,8 @@ func _general_tips() -> Array[String]:
 		"Your booster can be refilled at refuel stations. One appears on every even level (2, 4, 6...).",
 		"If your booster runs completely dry it detaches, and you can't get it back.",
 		"Dock at a station to choose: refuel the booster OR repair 25% hull, then pick a ship mod.",
-		"Your ship has 2 mod slots. Stations offer 2 random mods; when both slots are full you swap one out.",
+		"Your ship has %d mod slot%s. Stations offer 2 random mods; when every slot is full you swap one out." % [mods.size(), "" if mods.size() == 1 else "s"],
+		"Earn XP and credits every run. Level up to unlock bigger ships, mods and paint jobs in the Shop.",
 		"The Missile Pod holds 5 missiles (fire with %s) and reloads automatically every time you dock." % ("the MISSILE button" if touch_ui else "Space"),
 		"Bigger asteroids do more hull damage. Small ones only scratch.",
 		"Orange-glowing asteroids don't fall straight: they sway or drift sideways.",
@@ -1084,8 +1107,8 @@ func _open_station_mods() -> void:
 		return
 	var full := not mods.has("")
 	station_title.text = "SHIP MODIFICATION"
-	station_subtitle.text = "Pick one upgrade. Your ship has 2 mod slots%s." % (
-		" (both are full: you'll choose one to replace)" if full else "")
+	station_subtitle.text = "Pick one upgrade. Your ship has %d mod slot%s%s." % [mods.size(),
+		"" if mods.size() == 1 else "s", " (all full: you'll choose one to replace)" if full else ""]
 	_clear_options()
 	var first: Button = null
 	for id in _offer:
@@ -1108,14 +1131,14 @@ func _pick_mod(id: String) -> void:
 		_open_station_replace()
 
 
-## Step 3 (only when both slots are full): choose which fitted mod to swap out.
+## Step 3 (only when every slot is full): choose which fitted mod to swap out.
 func _open_station_replace() -> void:
 	_dock_step = "replace"
-	station_title.text = "BOTH SLOTS FULL"
+	station_title.text = "SLOTS FULL"
 	station_subtitle.text = "Replace which mod with %s?" % ModInfo.MODS[_pending_mod]["name"]
 	_clear_options()
 	var first: Button = null
-	for slot in 2:
+	for slot in mods.size():
 		var id := mods[slot]
 		var info: Dictionary = ModInfo.MODS[id]
 		var b := _option_button(id, "Remove " + String(info["name"]), "Slot %d. This mod is removed." % (slot + 1),
@@ -1147,7 +1170,7 @@ func _install_mod(id: String, slot: int) -> void:
 ## Recalculate everything the fitted mods change.
 func _apply_mods() -> void:
 	rocket.mods.assign(mods)  # the rocket draws its fitted mods
-	rocket.agility = ModInfo.RCS_AGILITY if mods.has("rcs") else 1.0
+	rocket.agility = (ModInfo.RCS_AGILITY if mods.has("rcs") else 1.0) * ship_agility
 	var new_max := 1.0 + (ModInfo.HULL_BONUS if mods.has("hull") else 0.0)
 	if new_max > hull_max:
 		hull += new_max - hull_max  # fitting the reinforced hull adds the extra plating
@@ -1227,11 +1250,14 @@ func _update_mod_panel() -> void:
 		mod_panel.visible = show_panel
 	if not show_panel:
 		return
-	var key := "%s|%s|%d|%s|%s" % [mods[0], mods[1], missile_ammo, hull >= hull_max, touch_ui]
+	var key := "%s|%d|%s|%s" % [",".join(mods), missile_ammo, hull >= hull_max, touch_ui]
 	if key == _mod_panel_key:
 		return
 	_mod_panel_key = key
-	for slot in 2:
+	for slot in mod_slots.size():
+		mod_slots[slot].visible = slot < mods.size()
+		if slot >= mods.size():
+			continue
 		var row: Control = mod_slots[slot]
 		var id := mods[slot]
 		row.get_node("Icon").mod_id = id
@@ -1688,7 +1714,7 @@ func _on_rocket_hit(area: Area2D) -> void:
 
 	# Asteroid impact: bigger rocks do more hull damage. The rock shatters on impact.
 	var rock_radius: float = area.radius
-	var damage := remap(clampf(rock_radius, 18.0, 46.0), 18.0, 46.0, 0.15, 0.35)
+	var damage := remap(clampf(rock_radius, 18.0, 46.0), 18.0, 46.0, 0.15, 0.35) * ship_damage
 	hull = maxf(hull - damage, 0.0)
 	_shatter(area)
 	area.queue_free()
@@ -1729,6 +1755,7 @@ func _hull_breach() -> void:
 		int(score), level, _planet(level)["name"],
 		"NEW BEST!" if new_best else "Best: %d" % int(best_score)]
 	game_over.visible = true
+	_give_run_reward()
 	# Short delay so a key/finger still held from playing doesn't press a button by accident.
 	play_again_button.disabled = true
 	menu_button.disabled = true
@@ -1971,6 +1998,9 @@ func _make_multiplayer_ui() -> void:
 func _open_multiplayer() -> void:
 	menu.visible = false
 	mp_screen.visible = true
+	if not Profile.is_account():
+		_show_mp_need_account()
+		return
 	if Net.in_room():
 		_show_mp_lobby()
 		return
@@ -2037,19 +2067,7 @@ func _show_mp_join() -> void:
 	_mp_label("Race up to 3 friends through the same asteroid field.\nFirst through Level %d wins!" % RACE_LEVELS,
 		16, Color(0.8, 0.84, 0.92))
 
-	var name_row := HBoxContainer.new()
-	name_row.add_theme_constant_override("separation", 12)
-	var name_label := Label.new()
-	name_label.text = "Pilot name"
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_row.add_child(name_label)
-	_mp_name_edit = LineEdit.new()
-	_mp_name_edit.max_length = 12
-	_mp_name_edit.placeholder_text = "Pilot"
-	_mp_name_edit.text = player_name
-	_mp_name_edit.custom_minimum_size = Vector2(200, 46)
-	name_row.add_child(_mp_name_edit)
-	mp_box.add_child(name_row)
+	_mp_label("Flying as %s  ·  Multiplayer level %d" % [Profile.username, Profile.mp_level()], 18, Color(0.55, 0.85, 1))
 
 	_mp_buttons.append(_mp_button("Create Room", _on_create_room))
 
@@ -2075,14 +2093,9 @@ func _show_mp_join() -> void:
 		_set_mp_status("Connected. Create a room or join one with a code.", Color(0.45, 1, 0.6))
 
 
+## Multiplayer names are account names (the server uses the login, not this).
 func _remember_name() -> String:
-	var n := _mp_name_edit.text.strip_edges() if _mp_name_edit else player_name
-	if n == "":
-		n = "Pilot"
-	if n != player_name:
-		player_name = n
-		_save()
-	return n
+	return Profile.username
 
 
 func _on_create_room() -> void:
@@ -2097,6 +2110,19 @@ func _on_join_room() -> void:
 		return
 	_set_mp_status("Joining %s…" % code, Color(0.9, 0.85, 0.5))
 	Net.join_room(code, _remember_name())
+
+
+## Guests can't race: explain and offer to log in / sign up.
+func _show_mp_need_account() -> void:
+	_clear_mp()
+	_mp_label("MULTIPLAYER", 44, Color(1, 0.75, 0.35))
+	_mp_label("Multiplayer needs a pilot account.\nSign up (free) to race friends and earn Multiplayer XP.\nYour guest progress comes with you.",
+		16, Color(0.8, 0.84, 0.92))
+	var b := _mp_button("Log In / Sign Up", func() -> void:
+		mp_screen.visible = false
+		_open_profile_page("account"))
+	_mp_button("Back", _close_multiplayer)
+	b.grab_focus()
 
 
 ## The room: share the code, see who's in, host starts the race.
@@ -2140,6 +2166,142 @@ func _show_mp_lobby() -> void:
 		_set_mp_status("Waiting for the host to start the race…", Color(0.9, 0.85, 0.5))
 	var leave := _mp_button("Leave Room", _close_multiplayer)
 	(first if first and not first.disabled else leave).grab_focus()
+
+
+# --- Accounts, hangar, shop, rewards ------------------------------------------------
+
+func _make_profile_ui() -> void:
+	profile_ui = ProfileUI.new()
+	add_child(profile_ui)
+	profile_ui.setup(settings)
+	profile_ui.closed.connect(_show_menu)
+
+	var vbox := start_button.get_parent()
+	# Who's flying: avatar + name + levels, under the title.
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 8)
+	profile_avatar = Animals.new()
+	profile_avatar.custom_minimum_size = Vector2(44, 44)
+	row.add_child(profile_avatar)
+	profile_label = Label.new()
+	profile_label.add_theme_font_size_override("font_size", 16)
+	profile_label.add_theme_color_override("font_color", Color(0.55, 0.85, 1))
+	row.add_child(profile_label)
+	vbox.add_child(row)
+	vbox.move_child(row, best_label.get_index() + 1)
+
+	# Hangar + Shop side by side, then the account button.
+	var pair := HBoxContainer.new()
+	pair.add_theme_constant_override("separation", 8)
+	for spec in [["Hangar", "hangar"], ["Shop", "shop"]]:
+		var b := Button.new()
+		b.text = spec[0]
+		b.custom_minimum_size = Vector2(146, 46)
+		b.add_theme_font_size_override("font_size", 22)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.pressed.connect(_open_profile_page.bind(spec[1]))
+		pair.add_child(b)
+	multiplayer_button.add_sibling(pair)
+	account_button = Button.new()
+	account_button.custom_minimum_size = start_button.custom_minimum_size
+	account_button.add_theme_font_size_override("font_size", 22)
+	account_button.pressed.connect(_open_profile_page.bind("account"))
+	settings_button.add_sibling(account_button)
+	_update_profile_line()
+
+	# Once per launch, check the saved login is still valid and pick up the latest progress.
+	if Profile.is_account() and not _profile_checked:
+		_profile_checked = true
+		Profile.refresh()
+
+
+func _open_profile_page(page: String) -> void:
+	menu.visible = false
+	settings.visible = false
+	scoreboard.visible = false
+	mp_screen.visible = false
+	profile_ui.open(page)
+
+
+func _update_profile_line() -> void:
+	if profile_label == null:
+		return
+	profile_avatar.animal = Profile.character()
+	if Profile.is_account():
+		profile_label.text = "%s  ·  SP Lvl %d  ·  MP Lvl %d  ·  %d cr" % [
+			Profile.username, Profile.sp_level(), Profile.mp_level(), Profile.credits()]
+		account_button.text = "Pilot Profile"
+	else:
+		profile_label.text = "Guest  ·  Lvl %d  ·  %d cr" % [Profile.sp_level(), Profile.credits()]
+		account_button.text = "Log In / Sign Up"
+
+
+func _on_profile_changed() -> void:
+	_update_profile_line()
+	if state == State.MENU or state == State.READY:
+		_apply_loadout()
+
+
+## Ship, paint, pilot and starting mods from the hangar.
+func _apply_loadout() -> void:
+	var ship_info := Profile.ship()
+	var slots := int(ship_info.get("slots", 2))
+	ship_agility = float(ship_info.get("agility", 1.0))
+	ship_damage = float(ship_info.get("damage", 1.0))
+	rocket.scale = Vector2.ONE * float(ship_info.get("size", 1.0))
+	var d := Profile.design()
+	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
+	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
+	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
+	rocket.pilot = Profile.character()
+	var fitted: Array[String] = []
+	for id in Profile.loadout()["mods"]:
+		fitted.append(str(id))
+	while fitted.size() < slots:
+		fitted.append("")
+	fitted.resize(slots)
+	mods = fitted
+	var slot_word := "SLOT" if slots == 1 else "SLOTS"
+	$UI/Root/ModPanel/VBox/ModTitle.text = "%s · %d %s" % [str(ship_info.get("name", "SHIP")).to_upper(), slots, slot_word]
+	# The ship mods panel has 2 rows in the scene; the Hauler needs a 3rd.
+	while mod_slots.size() < slots:
+		var extra: Control = mod_slots[-1].duplicate()
+		mod_slots[-1].add_sibling(extra)
+		mod_slots.append(extra)
+	hull_max = 1.0
+	hull = 1.0
+	missile_ammo = ModInfo.MISSILE_AMMO if mods.has("missile") else 0
+	_apply_mods()
+	_mod_panel_key = ""
+	rocket.queue_redraw()
+
+
+## Single-player run over: XP + credits (shown on the game over panel).
+func _give_run_reward() -> void:
+	var reward: Dictionary = await Profile.report_run(int(score), level)
+	if reward.is_empty() or not is_instance_valid(result_label) or state != State.OVER:
+		return
+	result_label.text += "\n\n" + _reward_text(reward)
+
+
+## Race rewards arrive from the server right after the results.
+func _on_profile_rewarded(reward: Dictionary) -> void:
+	if race_mode and state == State.OVER and str(reward.get("track", "")) == "mp":
+		result_label.text += "\n\n" + _reward_text(reward)
+
+
+func _reward_text(reward: Dictionary) -> String:
+	var track := "Multiplayer" if str(reward.get("track", "")) == "mp" else "Single Player"
+	var text := "+%d XP   ·   +%d credits" % [int(reward.get("xp", 0)), int(reward.get("credits", 0))]
+	var before := int(reward.get("level_before", 1))
+	var after := int(reward.get("level_after", 1))
+	if after > before:
+		text += "\nLEVEL UP!  %s level %d" % [track, after]
+		var shop := int(Profile.catalog.get("shop_level", 2))
+		if before < shop and after >= shop:
+			text += "  ·  Shop unlocked!"
+	return text
 
 
 # --- Drawing -----------------------------------------------------------------

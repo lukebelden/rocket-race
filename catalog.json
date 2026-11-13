@@ -1,0 +1,51 @@
+{
+  "_about": "Rocket Race progression. Read by the game (profile.gd) AND the server (server/index.js), so prices and unlock levels only live here.",
+  "levels": {
+    "first": 1000,
+    "step": 500,
+    "max": 50,
+    "_note": "XP needed to go from level L to L+1 = first + step * (L - 1)."
+  },
+  "rewards": {
+    "_note": "XP = score + per_level x level reached (+ place bonus in races). Credits = score / score_per_credit + credits_per_level x level reached (+ place bonus). Levelling up also pays level_up_credits x the new level.",
+    "xp_per_level_reached": 150,
+    "score_per_credit": 20,
+    "credits_per_level_reached": 20,
+    "level_up_credits": 100,
+    "race_place_xp": [400, 250, 150, 100],
+    "race_place_credits": [150, 100, 60, 40],
+    "race_finish_xp": 200
+  },
+  "shop_level": 2,
+  "characters": [
+    { "id": "duck", "name": "Duck" },
+    { "id": "mouse", "name": "Mouse" },
+    { "id": "dog", "name": "Dog" },
+    { "id": "cat", "name": "Cat" },
+    { "id": "bear", "name": "Bear" },
+    { "id": "raccoon", "name": "Raccoon" },
+    { "id": "monkey", "name": "Monkey" }
+  ],
+  "ships": [
+    { "id": "small", "name": "Scout", "desc": "1 mod slot. Small and nimble, but takes more damage.", "level": 1, "price": 0, "slots": 1, "agility": 1.25, "size": 0.85, "damage": 1.3 },
+    { "id": "medium", "name": "Cruiser", "desc": "2 mod slots. Balanced all-rounder.", "level": 10, "price": 2500, "slots": 2, "agility": 1.0, "size": 1.0, "damage": 1.0 },
+    { "id": "heavy", "name": "Hauler", "desc": "3 mod slots. Big and slow to turn, but tough.", "level": 25, "price": 8000, "slots": 3, "agility": 0.8, "size": 1.15, "damage": 0.7 }
+  ],
+  "mods": [
+    { "id": "radar", "level": 2, "price": 400 },
+    { "id": "hull", "level": 4, "price": 600 },
+    { "id": "rcs", "level": 6, "price": 800 },
+    { "id": "thruster", "level": 8, "price": 1000 },
+    { "id": "healing", "level": 12, "price": 1500 },
+    { "id": "missile", "level": 16, "price": 2000 }
+  ],
+  "designs": [
+    { "id": "classic", "name": "Classic Red", "level": 1, "price": 0, "main": "#db3333", "dark": "#991a1f", "body": "#f2f5fa" },
+    { "id": "ocean", "name": "Ocean Blue", "level": 2, "price": 200, "main": "#2f7fe0", "dark": "#1b4f99", "body": "#f2f5fa" },
+    { "id": "lime", "name": "Lime Zest", "level": 3, "price": 300, "main": "#6cc93a", "dark": "#3f7d1f", "body": "#f4f8ef" },
+    { "id": "sunset", "name": "Sunset", "level": 5, "price": 500, "main": "#ff8a2a", "dark": "#b8501a", "body": "#fff4e6" },
+    { "id": "violet", "name": "Violet", "level": 7, "price": 700, "main": "#9a5ae0", "dark": "#5e2f99", "body": "#f5f0fb" },
+    { "id": "midnight", "name": "Midnight", "level": 10, "price": 1000, "main": "#3a4a6b", "dark": "#1e2638", "body": "#c9d2e3" },
+    { "id": "gold", "name": "Gold Rush", "level": 20, "price": 2500, "main": "#e8b923", "dark": "#9a7410", "body": "#2a2a30" }
+  ]
+}

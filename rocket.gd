@@ -41,6 +41,13 @@ var missile_count: int = 0
 var _time: float = 0.0
 
 const ModInfo := preload("res://mods.gd")
+const Animals := preload("res://animals.gd")
+
+## Paint job (shop "designs") and the animal pilot in the window. Set by game.gd from Profile.
+var paint_main := Color(0.86, 0.2, 0.2)
+var paint_dark := Color(0.6, 0.1, 0.12)
+var paint_body := Color(0.95, 0.96, 0.98)
+var pilot: String = ""
 
 ## Screen x position of the finger steering the rocket, or NAN when not touching.
 var touch_x: float = NAN
@@ -155,10 +162,10 @@ func _detach_booster() -> void:
 
 
 func _draw() -> void:
-	var red := Color(0.86, 0.2, 0.2)
-	var dark_red := Color(0.6, 0.1, 0.12)
-	var white := Color(0.95, 0.96, 0.98)
-	var shade := Color(0.75, 0.78, 0.84)
+	var red := paint_main
+	var dark_red := paint_dark
+	var white := paint_body
+	var shade := paint_body.darkened(0.18)
 
 	var thruster := mods.has("thruster")
 
@@ -254,11 +261,17 @@ func _draw() -> void:
 	draw_line(Vector2(-10, 2), Vector2(10, 2), Color(0.6, 0.63, 0.7), 1.0)
 	draw_rect(Rect2(-10, 10, 20, 4), red)
 
-	# Porthole window with a rim and glint.
-	draw_circle(Vector2(0, -7), 6.5, Color(0.55, 0.58, 0.65))
-	draw_circle(Vector2(0, -7), 5.0, Color(0.2, 0.55, 0.95))
-	draw_circle(Vector2(1.5, -5.5), 2.5, Color(0.12, 0.35, 0.75))
-	draw_circle(Vector2(-1.8, -8.8), 1.6, Color(1, 1, 1, 0.9))
+	# Porthole window with a rim and glint (and your animal pilot looking out).
+	if pilot != "":
+		draw_circle(Vector2(0, -8), 8.5, Color(0.55, 0.58, 0.65))
+		draw_circle(Vector2(0, -8), 7.2, Color(0.55, 0.78, 1.0))
+		Animals.draw_face(self, Vector2(0, -7.5), 5.4, pilot)
+		draw_arc(Vector2(0, -8), 6.4, PI * 1.1, PI * 1.45, 6, Color(1, 1, 1, 0.75), 1.2)
+	else:
+		draw_circle(Vector2(0, -7), 6.5, Color(0.55, 0.58, 0.65))
+		draw_circle(Vector2(0, -7), 5.0, Color(0.2, 0.55, 0.95))
+		draw_circle(Vector2(1.5, -5.5), 2.5, Color(0.12, 0.35, 0.75))
+		draw_circle(Vector2(-1.8, -8.8), 1.6, Color(1, 1, 1, 0.9))
 
 	# Healing Panel: a pulsing green repair cross on the hull.
 	if mods.has("healing"):
