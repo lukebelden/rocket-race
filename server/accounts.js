@@ -88,6 +88,30 @@ for (const row of db.prepare("SELECT id, profile FROM users").all()) {
 
 const SESSION_DAYS = 60;
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
+
+// Names that look like staff, so players can't pretend to be admins in lobbies/scoreboards.
+// Checked on a "flattened" name: lowercase, _ removed, look-alike digits turned into letters
+// (Adm1n, 4dmin, adm_in, M0d...). Existing accounts (like the real Admin) aren't affected.
+const RESERVED_PARTS = ["admin", "administrator", "moderator", "staff", "official", "support",
+  "rocketrace", "owner", "developer", "gamemaster", "system", "server", "helpdesk"];
+const RESERVED_EXACT = ["mod", "mods", "dev", "devs", "gm", "root", "sysop", "op", "team", "help"];
+
+function flattenName(name) {
+  return String(name).toLowerCase().replace(/_/g, "")
+    .replace(/0/g, "o").replace(/[1!|]/g, "i").replace(/3/g, "e").replace(/4/g, "a")
+    .replace(/5/g, "s").replace(/7/g, "t").replace(/8/g, "b").replace(/9/g, "g");
+}
+
+// Real words that happen to contain a reserved word.
+const RESERVED_OK = ["badminton"];
+
+function reservedName(name) {
+  const flat = flattenName(name);
+  if (RESERVED_OK.some((w) => flat.includes(w))) return false;
+  const lettersOnly = flat.replace(/[^a-z]/g, "");
+  const variants = [flat, flat.replace(/i/g, "l"), lettersOnly];  // 1 can stand for i or l
+  return variants.some((v) => RESERVED_EXACT.includes(v) || RESERVED_PARTS.some((p) => v.includes(p)));
+}
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
 const MIN_PASSWORD = 8;
 const LOCK_AFTER = 10;
@@ -152,6 +176,7 @@ function signup(username, password, email, guestProfile) {
   username = String(username || "").trim();
   email = cleanEmail(email);
   if (!USERNAME_RE.test(username)) return { error: "Usernames are 3-16 letters, numbers or _." };
+  if (reservedName(username)) return { error: "That name is reserved for the Rocket Race team. Please pick another." };
   const bad = checkPassword(password) || checkEmail(email);
   if (bad) return { error: bad };
   if (db.prepare("SELECT 1 FROM users WHERE username = ?").get(username)) return { error: "That username is taken." };
