@@ -2,61 +2,532 @@
 
 [ext_resource type="Script" uid="uid://dtmega4teiggx" path="res://game.gd" id="1_game"]
 [ext_resource type="Script" uid="uid://ciqjxbt6ndw4v" path="res://rocket.gd" id="2_rocket"]
+[ext_resource type="Script" path="res://cockpit.gd" id="3_cockpit"]
+[ext_resource type="Script" path="res://caution_light.gd" id="4_caution"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rocket"]
 radius = 12.0
 height = 52.0
 
-[node name="Game" type="Node2D" unique_id=778054183]
+[sub_resource type="StyleBoxFlat" id="StyleBox_btn_normal"]
+content_margin_left = 24.0
+content_margin_top = 10.0
+content_margin_right = 24.0
+content_margin_bottom = 10.0
+bg_color = Color(0.1, 0.12, 0.24, 0.92)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.35, 0.55, 1, 0.9)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_btn_hover"]
+content_margin_left = 24.0
+content_margin_top = 10.0
+content_margin_right = 24.0
+content_margin_bottom = 10.0
+bg_color = Color(0.16, 0.2, 0.38, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.55, 0.75, 1, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_btn_pressed"]
+content_margin_left = 24.0
+content_margin_top = 10.0
+content_margin_right = 24.0
+content_margin_bottom = 10.0
+bg_color = Color(0.85, 0.3, 0.2, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 0.7, 0.5, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_btn_focus"]
+draw_center = false
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(1, 0.8, 0.3, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_panel"]
+content_margin_left = 40.0
+content_margin_top = 32.0
+content_margin_right = 40.0
+content_margin_bottom = 32.0
+bg_color = Color(0.04, 0.05, 0.12, 0.85)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.25, 0.35, 0.7, 0.8)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_fuel_bg"]
+bg_color = Color(0.05, 0.06, 0.12, 0.85)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.5, 0.55, 0.7, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_fuel_fill"]
+bg_color = Color(1, 0.6, 0.15, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_hull_fill"]
+bg_color = Color(0.3, 0.9, 0.45, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_tip"]
+content_margin_left = 14.0
+content_margin_top = 8.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+bg_color = Color(0.04, 0.07, 0.13, 0.72)
+border_width_left = 4
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.75, 1, 0.7)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="Theme" id="Theme_ui"]
+default_font_size = 28
+Button/styles/focus = SubResource("StyleBox_btn_focus")
+Button/styles/hover = SubResource("StyleBox_btn_hover")
+Button/styles/normal = SubResource("StyleBox_btn_normal")
+Button/styles/pressed = SubResource("StyleBox_btn_pressed")
+PanelContainer/styles/panel = SubResource("StyleBox_panel")
+
+[node name="Game" type="Node2D"]
 script = ExtResource("1_game")
 
-[node name="Obstacles" type="Node2D" parent="." unique_id=798500548]
+[node name="Obstacles" type="Node2D" parent="."]
 
-[node name="Rocket" type="Area2D" parent="." unique_id=2071495938]
+[node name="Rocket" type="Area2D" parent="."]
 position = Vector2(576, 560)
 script = ExtResource("2_rocket")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Rocket" unique_id=2016214741]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Rocket"]
 shape = SubResource("CapsuleShape2D_rocket")
 
-[node name="Flame" type="Polygon2D" parent="Rocket" unique_id=1092746630]
-position = Vector2(0, 20)
-color = Color(1, 0.6, 0.1, 1)
-polygon = PackedVector2Array(-7, 0, 7, 0, 0, 22)
+[node name="UI" type="CanvasLayer" parent="."]
 
-[node name="Fins" type="Polygon2D" parent="Rocket" unique_id=452136256]
-color = Color(0.85, 0.2, 0.2, 1)
-polygon = PackedVector2Array(-10, 2, -20, 24, -10, 20, 10, 20, 20, 24, 10, 2)
-
-[node name="Body" type="Polygon2D" parent="Rocket" unique_id=1605780457]
-color = Color(0.9, 0.92, 0.95, 1)
-polygon = PackedVector2Array(10, -16, 10, 20, -10, 20, -10, -16)
-
-[node name="Nose" type="Polygon2D" parent="Rocket" unique_id=1212011437]
-color = Color(0.85, 0.2, 0.2, 1)
-polygon = PackedVector2Array(0, -32, 10, -16, -10, -16)
-
-[node name="Window" type="Polygon2D" parent="Rocket" unique_id=1423009474]
-color = Color(0.35, 0.7, 1, 1)
-polygon = PackedVector2Array(0, -12, 5, -6, 0, 0, -5, -6)
-
-[node name="UI" type="CanvasLayer" parent="." unique_id=2055753315]
-
-[node name="ScoreLabel" type="Label" parent="UI" unique_id=690288250]
-offset_left = 16.0
-offset_top = 12.0
-offset_right = 400.0
-offset_bottom = 52.0
-theme_override_font_sizes/font_size = 28
-text = "Score: 0"
-
-[node name="MessageLabel" type="Label" parent="UI" unique_id=528860255]
+[node name="Root" type="Control" parent="UI"]
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_font_sizes/font_size = 36
-text = "ROCKET DODGE"
+mouse_filter = 2
+theme = SubResource("Theme_ui")
+
+[node name="Cockpit" type="Control" parent="UI/Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_cockpit")
+
+[node name="ScoreLabel" type="Label" parent="UI/Root"]
+layout_mode = 0
+offset_left = 30.0
+offset_top = 6.0
+offset_right = 400.0
+offset_bottom = 44.0
+theme_override_font_sizes/font_size = 24
+text = "Score: 0"
+vertical_alignment = 1
+
+[node name="LevelLabel" type="Label" parent="UI/Root"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -430.0
+offset_top = 6.0
+offset_right = -30.0
+offset_bottom = 44.0
+theme_override_font_sizes/font_size = 24
+vertical_alignment = 1
+grow_horizontal = 0
+theme_override_colors/font_color = Color(1, 0.8, 0.45, 1)
+text = "Level 1 · The Moon"
+horizontal_alignment = 2
+
+[node name="LevelBanner" type="Label" parent="UI/Root"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 150.0
+offset_bottom = 290.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.5, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 52
+text = "LEVEL 1
+THE MOON"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="Dashboard" type="GridContainer" parent="UI/Root"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 30.0
+offset_top = -56.0
+offset_right = -30.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/h_separation = 26
+theme_override_constants/v_separation = 8
+columns = 4
+
+[node name="CautionBox" type="HBoxContainer" parent="UI/Root/Dashboard"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="CautionLight" type="Control" parent="UI/Root/Dashboard/CautionBox"]
+custom_minimum_size = Vector2(26, 26)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("4_caution")
+
+[node name="CautionLabel" type="Label" parent="UI/Root/Dashboard/CautionBox"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.85, 0.55, 0.5, 1)
+theme_override_constants/line_spacing = -4
+theme_override_font_sizes/font_size = 13
+text = "MASTER
+CAUTION"
+
+[node name="FuelBox" type="VBoxContainer" parent="UI/Root/Dashboard"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 3
+
+[node name="FuelLabel" type="Label" parent="UI/Root/Dashboard/FuelBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
+theme_override_font_sizes/font_size = 14
+text = "BOOST FUEL  [Shift]"
+
+[node name="BoostBar" type="ProgressBar" parent="UI/Root/Dashboard/FuelBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/background = SubResource("StyleBox_fuel_bg")
+theme_override_styles/fill = SubResource("StyleBox_fuel_fill")
+max_value = 1.0
+step = 0.001
+value = 1.0
+show_percentage = false
+
+[node name="HullBox" type="VBoxContainer" parent="UI/Root/Dashboard"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 3
+
+[node name="HullLabel" type="Label" parent="UI/Root/Dashboard/HullBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.95, 0.65, 1)
+theme_override_font_sizes/font_size = 14
+text = "HULL INTEGRITY  100%"
+
+[node name="HullBar" type="ProgressBar" parent="UI/Root/Dashboard/HullBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/background = SubResource("StyleBox_fuel_bg")
+theme_override_styles/fill = SubResource("StyleBox_hull_fill")
+max_value = 1.0
+step = 0.001
+value = 1.0
+show_percentage = false
+
+[node name="NavBox" type="VBoxContainer" parent="UI/Root/Dashboard"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="NavTitle" type="Label" parent="UI/Root/Dashboard/NavBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "NAV BEACON · NEXT: LVL 3"
+
+[node name="NavValue" type="Label" parent="UI/Root/Dashboard/NavBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 1, 0.65, 1)
+theme_override_font_sizes/font_size = 18
+text = "NOT TRACKING"
+
+[node name="TipPanel" type="PanelContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -350.0
+offset_top = -250.0
+offset_right = -30.0
+offset_bottom = -180.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_tip")
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/TipPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="TipTitle" type="Label" parent="UI/Root/TipPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "SHIP COMPUTER · TIP"
+
+[node name="TipText" type="Label" parent="UI/Root/TipPanel/VBox"]
+custom_minimum_size = Vector2(290, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.92, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "Your booster can be refilled at refuel stations."
+autowrap_mode = 3
+
+[node name="LaunchPrompt" type="Label" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 14
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = -60.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.8, 0.4, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 10
+theme_override_font_sizes/font_size = 40
+text = "PRESS SPACE TO LAUNCH"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ToastLabel" type="Label" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 14
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = -20.0
+offset_bottom = 40.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.45, 1, 0.6, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.85)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 38
+text = "BOOSTER REFUELED!"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Menu" type="CenterContainer" parent="UI/Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 56.0
+offset_bottom = -150.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root/Menu"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/Menu/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="UI/Root/Menu/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
+theme_override_font_sizes/font_size = 54
+text = "ROCKET DODGE"
+horizontal_alignment = 1
+
+[node name="BestLabel" type="Label" parent="UI/Root/Menu/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.85, 1, 1)
+text = "Best: 0"
+horizontal_alignment = 1
+
+[node name="StartButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Start"
+
+[node name="SettingsButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitButton" type="Button" parent="UI/Root/Menu/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Quit"
+
+[node name="HintLabel" type="Label" parent="UI/Root/Menu/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.8, 1)
+theme_override_font_sizes/font_size = 20
+text = "Move: Left / Right or A / D"
+horizontal_alignment = 1
+
+[node name="Settings" type="CenterContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root/Settings"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/Settings/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="UI/Root/Settings/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
+theme_override_font_sizes/font_size = 44
+text = "SETTINGS"
+horizontal_alignment = 1
+
+[node name="DifficultyRow" type="HBoxContainer" parent="UI/Root/Settings/Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Label" type="Label" parent="UI/Root/Settings/Panel/VBox/DifficultyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Difficulty"
+
+[node name="DifficultyOption" type="OptionButton" parent="UI/Root/Settings/Panel/VBox/DifficultyRow"]
+custom_minimum_size = Vector2(170, 56)
+layout_mode = 2
+
+[node name="FullscreenCheck" type="CheckButton" parent="UI/Root/Settings/Panel/VBox"]
+custom_minimum_size = Vector2(300, 56)
+layout_mode = 2
+text = "Fullscreen"
+
+[node name="ResetButton" type="Button" parent="UI/Root/Settings/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Reset Best Score"
+
+[node name="BackButton" type="Button" parent="UI/Root/Settings/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Back"
+
+[node name="GameOver" type="CenterContainer" parent="UI/Root"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root/GameOver"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/GameOver/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="UI/Root/GameOver/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.45, 0.35, 1)
+theme_override_font_sizes/font_size = 54
+text = "CRASH!"
+horizontal_alignment = 1
+
+[node name="ResultLabel" type="Label" parent="UI/Root/GameOver/Panel/VBox"]
+layout_mode = 2
+text = "Score: 0
+Best: 0"
+horizontal_alignment = 1
+
+[node name="PlayAgainButton" type="Button" parent="UI/Root/GameOver/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Play Again"
+
+[node name="MenuButton" type="Button" parent="UI/Root/GameOver/Panel/VBox"]
+custom_minimum_size = Vector2(300, 64)
+layout_mode = 2
+text = "Menu"
