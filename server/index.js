@@ -330,11 +330,24 @@ async function handleAdminApi(req, res, url) {
       return json(res, 200, accounts.listTickets({ status: p.get("status") || "all", category: p.get("category") || "all", q: p.get("q") || "" }));
     }
     if (route === "GET /api/admin/players") return json(res, 200, { rows: accounts.searchPlayers(url.searchParams.get("q") || "") });
-    const pm = url.pathname.match(/^\/api\/admin\/players\/([A-Za-z0-9_]{1,16})(\/adjust|\/item)?$/);
+    if (route === "POST /api/admin/players") {
+      const body = await readJson(req);
+      const result = accounts.createTestAccount(admin.username, body.username, body.password, body.email);
+      if (result.error) return json(res, 400, { error: result.error });
+      console.log(`Admin ${admin.username} created test account ${result.username}`);
+      return json(res, 200, accounts.getPlayer(result.username));
+    }
+    const pm = url.pathname.match(/^\/api\/admin\/players\/([A-Za-z0-9_]{1,16})(\/adjust|\/item|\/delete)?$/);
     if (pm) {
       if (req.method === "GET" && !pm[2]) {
         const p = accounts.getPlayer(pm[1]);
         return p ? json(res, 200, p) : json(res, 404, { error: "No such player." });
+      }
+      if (req.method === "POST" && pm[2] === "/delete") {
+        const result = accounts.deleteTestAccount(admin.username, pm[1]);
+        if (result.error) return json(res, 400, { error: result.error });
+        console.log(`Admin ${admin.username} deleted test account ${pm[1]}`);
+        return json(res, 200, { ok: true });
       }
       if (req.method === "POST" && pm[2]) {
         const body = await readJson(req);

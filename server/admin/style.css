@@ -161,3 +161,10 @@ input, select, textarea {
 .ok { color: var(--resolved); min-height: 1.2em; margin: 0; }
 @media (max-width: 760px) { .views { margin-left: 8px; } .topbar { flex-wrap: wrap; } .adjust { grid-template-columns: 1fr 1fr; } }
 .open-player { margin-top: 8px; }
+
+.new-test { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 20px 12px; }
+.new-test strong { color: var(--gold); font-size: 14px; margin-right: 4px; }
+.new-test input { width: auto; flex: 1; min-width: 140px; max-width: 220px; }
+.test-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--in_progress); color: var(--in_progress); margin-left: 6px; vertical-align: middle; }
+.danger { background: transparent; border: 1px solid var(--error); color: var(--error); border-radius: 8px; padding: 7px 14px; margin-top: 16px; }
+@media (max-width: 760px) { .new-test { padding: 0 16px 12px; } }

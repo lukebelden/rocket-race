@@ -62,6 +62,14 @@
       <div class="filters">
         <input id="player-search" type="search" placeholder="Search username or email" aria-label="Search players">
       </div>
+      <form id="new-test" class="new-test">
+        <strong>New test account</strong>
+        <input id="nt-user" placeholder="Username" autocomplete="off" aria-label="Test username" required>
+        <input id="nt-pass" type="password" placeholder="Password (8+)" autocomplete="new-password" aria-label="Test password" required>
+        <input id="nt-mail" type="email" placeholder="Email (optional)" autocomplete="off" aria-label="Test email (optional)">
+        <button class="primary" type="submit">Create</button>
+        <span id="nt-msg" class="error" role="status"></span>
+      </form>
       <div class="layout">
         <section class="list" aria-label="Players"><ul id="players"></ul>
           <p id="players-empty" class="muted empty" hidden>No players found.</p></section>

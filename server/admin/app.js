@@ -214,12 +214,29 @@ async function loadPlayers() {
   }
   $("players").replaceChildren(...data.rows.map((p) => el("li", {},
     el("button", { class: "row", "aria-current": String(p.username === currentPlayer), onclick: () => openPlayer(p.username) },
-      el("span", { class: "row-top" }, el("span", { class: "id", text: p.username + (p.admin ? " (admin)" : "") }),
+      el("span", { class: "row-top" }, el("span", { class: "id", text: p.username + (p.admin ? " (admin)" : "") }, p.test ? el("span", { class: "test-tag", text: "TEST" }) : null),
         el("span", { class: "when muted", text: "joined " + ago(p.created_at) })),
       el("span", { class: "row-bottom muted" },
         el("span", { text: `SP Lvl ${p.sp_level} · ${p.sp_credits} cr   ·   MP Lvl ${p.mp_level} · ${p.mp_credits} cr` }))))));
   $("players-empty").hidden = data.rows.length > 0;
 }
+$("new-test").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("nt-msg").className = "error";
+  $("nt-msg").textContent = "";
+  try {
+    const p = await api("POST", "/api/admin/players", { username: $("nt-user").value.trim(), password: $("nt-pass").value, email: $("nt-mail").value.trim() });
+    $("nt-user").value = ""; $("nt-pass").value = ""; $("nt-mail").value = "";
+    $("nt-msg").className = "ok";
+    $("nt-msg").textContent = `Created ${p.username}. Log in to the game with it.`;
+    currentPlayer = p.username;
+    renderPlayer(p, "Test account created.");
+    loadPlayers();
+  } catch (err) {
+    $("nt-msg").textContent = err.message;
+  }
+});
+
 let playerTimer = 0;
 $("player-search").addEventListener("input", () => {
   clearTimeout(playerTimer);
@@ -285,13 +302,22 @@ function renderPlayer(p, message = "", isError = false) {
     : [el("li", { text: "No admin changes yet." })]));
 
   $("player-detail").replaceChildren(
-    el("h2", { text: p.username + (p.admin ? " (admin)" : "") }),
+    el("h2", { text: p.username + (p.admin ? " (admin)" : "") }, p.test ? el("span", { class: "test-tag", text: "TEST" }) : null),
     el("div", { class: "meta" }, el("span", { text: p.email || "no email" }), el("span", { text: "· pilot: " + p.character }),
       el("span", { text: "· joined " + new Date(p.created_at).toLocaleDateString() })),
     el("p", { class: "muted", text: `Runs ${st.sp_runs} · best ${st.sp_best}   ·   Races ${st.mp_races} · wins ${st.mp_wins} · best race ${st.mp_best}` }),
     status,
     el("div", { class: "mode-grid" }, ...MODES.map(([track, title]) => modeCard(track, title))),
-    el("p", { class: "section-title", text: "Change history" }), history);
+    el("p", { class: "section-title", text: "Change history" }), history,
+    p.test ? el("button", { class: "danger", text: "Delete test account", onclick: async () => {
+      if (!confirm(`Delete the test account "${p.username}"? This can't be undone.`)) return;
+      try {
+        await api("POST", `/api/admin/players/${encodeURIComponent(p.username)}/delete`);
+        currentPlayer = "";
+        $("player-detail").replaceChildren(el("p", { class: "ok placeholder", text: `Deleted test account ${p.username}.` }));
+        loadPlayers();
+      } catch (err) { status.className = "error"; status.textContent = err.message; }
+    } }) : null);
 }
 
 // --- Start -------------------------------------------------------------------------------

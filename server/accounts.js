@@ -61,6 +61,8 @@ db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email) WHERE ema
 // Admins (for the /admin ticket page) and ticket tracking.
 const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
 if (!hasColumn("users", "is_admin")) db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+// Test accounts (made from the admin page): no email needed, hidden from the scoreboards.
+if (!hasColumn("users", "is_test")) db.exec("ALTER TABLE users ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0");
 if (!hasColumn("reports", "updated_at")) db.exec("ALTER TABLE reports ADD COLUMN updated_at INTEGER");
 db.exec(`
   UPDATE reports SET status = 'resolved' WHERE status = 'done';
@@ -481,18 +483,46 @@ function logAdmin(admin, target, action) {
 
 function searchPlayers(q = "", limit = 50) {
   const like = "%" + String(q).slice(0, 60) + "%";
-  return db.prepare(`SELECT username, email, created_at, is_admin, profile FROM users
+  return db.prepare(`SELECT username, email, created_at, is_admin, is_test, profile FROM users
       WHERE username LIKE ? OR email LIKE ? ORDER BY username COLLATE NOCASE LIMIT ?`)
     .all(like, like, limit)
     .map((u) => {
       const p = loadProfile(u);
-      return { username: u.username, email: u.email || "", created_at: u.created_at, admin: !!u.is_admin,
+      return { username: u.username, email: u.email || "", created_at: u.created_at, admin: !!u.is_admin, test: !!u.is_test,
         sp_level: progress.levelInfo(p.sp.xp).level, mp_level: progress.levelInfo(p.mp.xp).level,
         sp_credits: p.sp.credits, mp_credits: p.mp.credits };
     });
 }
 
 /** Full account for the admin page: profile, levels, stats, owned items, recent admin changes. */
+/** Admin page: make a test account. Email is optional; same name/password rules as sign-up. */
+function createTestAccount(adminName, username, password, email) {
+  username = String(username || "").trim();
+  email = cleanEmail(email);
+  if (!USERNAME_RE.test(username)) return { error: "Usernames are 3-16 letters, numbers or _." };
+  if (reservedName(username)) return { error: "That name is reserved for the Rocket Race team." };
+  const bad = checkPassword(password) || (email ? checkEmail(email) : "");
+  if (bad) return { error: bad };
+  if (db.prepare("SELECT 1 FROM users WHERE username = ?").get(username)) return { error: "That username is taken." };
+  const salt = crypto.randomBytes(16).toString("hex");
+  db.prepare("INSERT INTO users (username, email, pass_hash, salt, profile, created_at, is_test) VALUES (?, ?, ?, ?, ?, ?, 1)")
+    .run(username, email || null, hashPassword(String(password), salt), salt, JSON.stringify(progress.newProfile()), Date.now());
+  logAdmin(adminName, username, "created test account" + (email ? "" : " (no email)"));
+  return { username };
+}
+
+/** Admin page: delete a TEST account (real players' accounts can't be deleted from here). */
+function deleteTestAccount(adminName, name) {
+  const u = db.prepare("SELECT id, username, is_test FROM users WHERE username = ?").get(String(name));
+  if (!u) return { error: "No such player." };
+  if (!u.is_test) return { error: "Only test accounts can be deleted from the admin page." };
+  for (const t of ["sessions", "reset_codes", "admin_sessions"]) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(u.id);
+  db.prepare("UPDATE reports SET user_id = NULL WHERE user_id = ?").run(u.id);
+  db.prepare("DELETE FROM users WHERE id = ?").run(u.id);
+  logAdmin(adminName, u.username, "deleted test account");
+  return {};
+}
+
 function getPlayer(name) {
   const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
   if (!u) return null;
@@ -500,6 +530,7 @@ function getPlayer(name) {
   const view_ = view(user);
   view_.created_at = u.created_at;
   view_.admin = !!u.is_admin;
+  view_.test = !!u.is_test;
   view_.history = db.prepare("SELECT created_at, admin, action FROM admin_log WHERE target = ? ORDER BY id DESC LIMIT 30").all(u.username);
   view_.catalog = { ships: progress.catalog.ships.map((s) => s.id), mods: progress.catalog.mods.map((m) => m.id),
     designs: progress.catalog.designs.map((d) => d.id) };
@@ -569,7 +600,7 @@ function leaderboard(mode, limit = 10) {
           json_extract(profile, '$.stats.mp_wins') AS wins, json_extract(profile, '$.stats.mp_races') AS races,
           json_extract(profile, '$.stats.mp_best') AS best,
           CAST(json_extract(profile, '$.stats.mp_wins') AS REAL) / json_extract(profile, '$.stats.mp_races') AS rate
-        FROM users WHERE json_extract(profile, '$.stats.mp_races') >= ?
+        FROM users WHERE is_test = 0 AND json_extract(profile, '$.stats.mp_races') >= ?
         ORDER BY rate DESC, best DESC LIMIT ?`)
       .all(MIN_RACES, limit)
       .map((r) => ({ ...r, rate: Math.round((r.rate || 0) * 100), level: 0 }));
@@ -577,7 +608,7 @@ function leaderboard(mode, limit = 10) {
   return db
     .prepare(`SELECT username AS name, json_extract(profile, '$.character') AS character,
         json_extract(profile, '$.stats.sp_best') AS best, json_extract(profile, '$.sp.xp') AS xp
-      FROM users WHERE json_extract(profile, '$.stats.sp_best') > 0
+      FROM users WHERE is_test = 0 AND json_extract(profile, '$.stats.sp_best') > 0
       ORDER BY best DESC LIMIT ?`)
     .all(limit)
     .map((r) => ({ name: r.name, character: r.character, best: r.best, level: progress.levelInfo(r.xp).level }));
@@ -589,5 +620,5 @@ module.exports = {
   addReport, listReports, setReportStatus, REPORT_CATEGORIES,
   TICKET_STATUSES, listTickets, getTicket, setTicketStatus, addTicketNote,
   setAdmin, listAdmins, adminLogin, adminForToken, adminLogout, ADMIN_SESSION_MS,
-  searchPlayers, getPlayer, adjustPlayer, setPlayerItem,
+  searchPlayers, getPlayer, adjustPlayer, setPlayerItem, createTestAccount, deleteTestAccount,
 };
