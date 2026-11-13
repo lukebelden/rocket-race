@@ -1,0 +1,62 @@
+[gd_scene format=3 uid="uid://du6lpk4g4k8yg"]
+
+[ext_resource type="Script" uid="uid://dtmega4teiggx" path="res://game.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://ciqjxbt6ndw4v" path="res://rocket.gd" id="2_rocket"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rocket"]
+radius = 12.0
+height = 52.0
+
+[node name="Game" type="Node2D" unique_id=778054183]
+script = ExtResource("1_game")
+
+[node name="Obstacles" type="Node2D" parent="." unique_id=798500548]
+
+[node name="Rocket" type="Area2D" parent="." unique_id=2071495938]
+position = Vector2(576, 560)
+script = ExtResource("2_rocket")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Rocket" unique_id=2016214741]
+shape = SubResource("CapsuleShape2D_rocket")
+
+[node name="Flame" type="Polygon2D" parent="Rocket" unique_id=1092746630]
+position = Vector2(0, 20)
+color = Color(1, 0.6, 0.1, 1)
+polygon = PackedVector2Array(-7, 0, 7, 0, 0, 22)
+
+[node name="Fins" type="Polygon2D" parent="Rocket" unique_id=452136256]
+color = Color(0.85, 0.2, 0.2, 1)
+polygon = PackedVector2Array(-10, 2, -20, 24, -10, 20, 10, 20, 20, 24, 10, 2)
+
+[node name="Body" type="Polygon2D" parent="Rocket" unique_id=1605780457]
+color = Color(0.9, 0.92, 0.95, 1)
+polygon = PackedVector2Array(10, -16, 10, 20, -10, 20, -10, -16)
+
+[node name="Nose" type="Polygon2D" parent="Rocket" unique_id=1212011437]
+color = Color(0.85, 0.2, 0.2, 1)
+polygon = PackedVector2Array(0, -32, 10, -16, -10, -16)
+
+[node name="Window" type="Polygon2D" parent="Rocket" unique_id=1423009474]
+color = Color(0.35, 0.7, 1, 1)
+polygon = PackedVector2Array(0, -12, 5, -6, 0, 0, -5, -6)
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=2055753315]
+
+[node name="ScoreLabel" type="Label" parent="UI" unique_id=690288250]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 400.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 28
+text = "Score: 0"
+
+[node name="MessageLabel" type="Label" parent="UI" unique_id=528860255]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 36
+text = "ROCKET DODGE"
+horizontal_alignment = 1
+vertical_alignment = 1
