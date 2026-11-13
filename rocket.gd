@@ -104,9 +104,11 @@ func _process(delta: float) -> void:
 	var thrust := acceleration * agility * (boost_multiplier if boosting else 1.0)
 
 	var dir := Input.get_axis("ui_left", "ui_right")
-	if Input.is_physical_key_pressed(KEY_A):
+	# A / D by key position (WASD on any layout) AND by the letter printed on the key, so
+	# they work on AZERTY, Dvorak and other keyboard layouts too.
+	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_label_pressed(KEY_A):
 		dir -= 1.0
-	if Input.is_physical_key_pressed(KEY_D):
+	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_label_pressed(KEY_D):
 		dir += 1.0
 	dir = clampf(dir, -1.0, 1.0)
 

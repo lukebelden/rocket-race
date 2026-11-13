@@ -934,6 +934,10 @@ func _setup_boost_input() -> void:
 		var event := InputEventKey.new()
 		event.physical_keycode = key
 		InputMap.action_add_event("boost", event)
+	# Also the key labelled W, wherever it is on non-QWERTY keyboards.
+	var w_label := InputEventKey.new()
+	w_label.key_label = KEY_W
+	InputMap.action_add_event("boost", w_label)
 	# Missile Pod mod: Space fires a missile (Space also launches from the pad).
 	InputMap.add_action("missile")
 	for key in [KEY_SPACE]:
