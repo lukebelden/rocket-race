@@ -6,7 +6,13 @@ signal connected
 signal disconnected
 signal room_updated(room: Dictionary)
 signal error(message: String)
-signal race_started(course_seed: int, countdown: float)
+## Host started a race: everyone goes to the pilot intro screen (ready_timeout = seconds
+## before anyone not ready is readied automatically).
+signal race_started(course_seed: int, ready_timeout: float)
+## Who has pressed Ready on the intro screen (player ids).
+signal ready_changed(ids: Array)
+## Everyone's ready: start the countdown (seconds).
+signal race_go(countdown: float)
 signal rival_state(id: int, data: Dictionary)
 signal rival_done(kind: String, data: Dictionary)  # kind = "crashed" or "finished"
 signal rival_left(id: int)
@@ -91,6 +97,11 @@ func start_race() -> void:
 	send({"t": "start"})
 
 
+## On the pilot intro screen: "I'm ready".
+func send_ready() -> void:
+	send({"t": "ready"})
+
+
 ## Player info (name, color) for an id in the current room, or {}.
 func player(id: int) -> Dictionary:
 	for p in room.get("players", []):
@@ -152,7 +163,12 @@ func _on_packet(text: String) -> String:
 		"error":
 			error.emit(str(msg.get("msg", "Something went wrong.")))
 		"start":
-			race_started.emit(int(msg.get("seed", 1)), float(msg.get("countdown", 3)))
+			race_started.emit(int(msg.get("seed", 1)), float(msg.get("ready_timeout", 30)))
+		"ready":
+			var ids = msg.get("ids", [])
+			ready_changed.emit(ids if ids is Array else [])
+		"go":
+			race_go.emit(float(msg.get("countdown", 3)))
 		"state":
 			rival_state.emit(int(msg.get("id", 0)), msg)
 		"crashed", "finished":

@@ -28,6 +28,8 @@ const MAX_PLAYERS = 4;
 const COUNTDOWN_MS = 3000;
 // Game's launch intro (game.gd INTRO_DURATION): the race clock starts after liftoff.
 const INTRO_MS = 3600;
+// Pre-race pilot intro: how long players get to press Ready before it's done for them.
+const READY_TIMEOUT_MS = 30000;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I / O (look like 1 / 0)
 const COLORS = ["#4fc3ff", "#ff6b5e", "#7dff8a", "#ffd34d"];
 // Must match game.gd: LEVEL_DURATION (distance per level) and RACE_LEVELS.
@@ -352,7 +354,10 @@ async function handleAdminApi(req, res, url) {
 
 // --- Rooms -------------------------------------------------------------------------------
 
-/** code -> { code, hostId, phase: "lobby"|"countdown"|"racing", players: Map<id, player>, raceStart, finishCount } */
+/** code -> { code, hostId, phase: "lobby"|"intro"|"countdown"|"racing", players: Map<id, player>, raceStart,
+ *  finishCount, ready: Set<id>, readyTimer }
+ *  intro: everyone sees the pilots pop out of their hatches and presses Ready; when all are
+ *  ready (or READY_TIMEOUT_MS passes) the countdown starts. */
 const rooms = new Map();
 let nextId = 1;
 
@@ -433,24 +438,50 @@ function leaveRoom(client) {
   client.room = null;
   room.players.delete(client.id);
   if (room.players.size === 0) {
+    clearTimeout(room.readyTimer);
     rooms.delete(room.code);
     return;
   }
   if (room.hostId === client.id) room.hostId = room.players.keys().next().value;
   broadcast(room, { t: "left", id: client.id });
+  if (room.phase === "intro") {
+    room.ready.delete(client.id);
+    sendReady(room);  // the rest may all be ready now
+  }
   if (room.phase !== "lobby") checkRaceOver(room);
   sendRoom(room);
 }
 
 function startRace(room) {
-  room.phase = "countdown";
+  room.phase = "intro";
   room.finishCount = 0;
-  room.raceStart = Date.now() + COUNTDOWN_MS + INTRO_MS;
+  room.ready = new Set();
   for (const p of room.players.values()) {
     Object.assign(p, { status: "racing", d: 0, score: 0, timeMs: 0, place: 0 });
   }
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
-  broadcast(room, { t: "start", seed, countdown: COUNTDOWN_MS / 1000 });
+  broadcast(room, { t: "start", seed, intro: true, ready_timeout: READY_TIMEOUT_MS / 1000 });
+  sendRoom(room);
+  // Nobody can stall the race: anyone not ready in time is readied automatically.
+  clearTimeout(room.readyTimer);
+  room.readyTimer = setTimeout(() => goRace(room), READY_TIMEOUT_MS);
+}
+
+function sendReady(room) {
+  broadcast(room, { t: "ready", ids: [...room.ready] });
+  if (room.phase === "intro" && [...room.players.keys()].every((id) => room.ready.has(id))) {
+    clearTimeout(room.readyTimer);
+    room.readyTimer = setTimeout(() => goRace(room), 900);  // a moment to see the last READY stamp
+  }
+}
+
+/** Everyone's ready: start the 3-2-1 countdown. */
+function goRace(room) {
+  if (room.phase !== "intro") return;
+  clearTimeout(room.readyTimer);
+  room.phase = "countdown";
+  room.raceStart = Date.now() + COUNTDOWN_MS + INTRO_MS;
+  broadcast(room, { t: "go", countdown: COUNTDOWN_MS / 1000 });
   sendRoom(room);
   setTimeout(() => {
     if (room.phase === "countdown") room.phase = "racing";
@@ -473,6 +504,7 @@ function checkRaceOver(room) {
   broadcast(room, { t: "results", ranking });
   giveRaceRewards(room, ranking);
   room.phase = "lobby";
+  clearTimeout(room.readyTimer);
   for (const p of players) p.status = "lobby";
   sendRoom(room);
 }
@@ -548,6 +580,12 @@ function handle(client, msg) {
         return send(client.ws, { t: "error", msg: `Need at least ${MIN_PLAYERS} pilots to race.` });
       }
       startRace(room);
+      break;
+    }
+    case "ready": {
+      if (!room || room.phase !== "intro" || room.ready.has(client.id)) return;
+      room.ready.add(client.id);
+      sendReady(room);
       break;
     }
     case "state": {

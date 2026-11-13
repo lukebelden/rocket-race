@@ -14,6 +14,7 @@ const Animals := preload("res://animals.gd")
 const PauseInput := preload("res://pause_input.gd")
 const PilotCard := preload("res://pilot_card.gd")
 const HangarBG := preload("res://hangar_bg.gd")
+const RaceIntro := preload("res://race_intro.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -134,6 +135,8 @@ var mode_menu: Control
 var _menu_track := ""
 var hangar_bg: Control
 var delete_button: Button
+## Multiplayer pre-race pilot intro (race_intro.gd), while it's up.
+var race_intro: Control
 ## Checked the saved login with the server once per game session.
 static var _profile_checked: bool = false
 
@@ -330,6 +333,10 @@ func _ready() -> void:
 	Net.connected.connect(_on_net_connected)
 	Net.disconnected.connect(_on_net_disconnected)
 	Net.race_started.connect(_on_race_started)
+	Net.race_go.connect(_on_race_go)
+	Net.ready_changed.connect(func(ids: Array) -> void:
+		if is_instance_valid(race_intro):
+			race_intro.set_ready(ids))
 	Net.rival_state.connect(func(id: int, data: Dictionary) -> void: rivals_node.update_rival(id, data))
 	Net.rival_done.connect(_on_rival_done)
 	Net.rival_left.connect(_on_rival_left)
@@ -1908,11 +1915,38 @@ func _begin_race(info: Dictionary) -> void:
 			_add_rival_card(id, p)
 	_show_menu()
 	_go_to_pad()
-	race_launch_at = int(info.get("launch_at", Time.get_ticks_msec() + 3000))
+	# Pilot intro first: the countdown only starts once everyone has pressed Ready.
+	race_launch_at = 0
+	launch_prompt.visible = false
+	race_intro = RaceIntro.new()
+	var players: Array = []
+	var me := Net.player(Net.my_id)
+	var my_paint := Color.html(str(Profile.design("mp").get("main", "#db3333")))
+	players.append({"id": Net.my_id, "name": str(me.get("name", Profile.username)), "character": Profile.character(),
+		"color": my_paint.lightened(0.1), "me": true})
+	for p in Net.room.get("players", []):
+		if int(p.get("id", 0)) != Net.my_id:
+			players.append({"id": int(p["id"]), "name": str(p.get("name", "Pilot")),
+				"character": str(p.get("character", "duck")), "color": Color.html(str(p.get("color", "#ffffff")))})
+	race_intro.setup(players, float(info.get("ready_timeout", 30.0)) - (Time.get_ticks_msec() - int(info.get("started_at", Time.get_ticks_msec()))) / 1000.0)
+	race_intro.ready_pressed.connect(Net.send_ready)
+	$UI/Root.add_child(race_intro)
+
+
+## Everyone's ready (server "go"): pilots climb back in, then the countdown runs on the pad.
+func _on_race_go(countdown: float) -> void:
+	if not race_mode:
+		return
+	race_launch_at = Time.get_ticks_msec() + int(countdown * 1000.0)
+	launch_prompt.visible = true
+	if is_instance_valid(race_intro):
+		race_intro.play_exit()
 	_update_race_countdown(0.0)
 
 
 func _update_race_countdown(_delta: float) -> void:
+	if race_launch_at == 0:
+		return  # still on the pilot intro, waiting for everyone to be ready
 	var race_countdown := (race_launch_at - Time.get_ticks_msec()) / 1000.0
 	if ceili(race_countdown) != _last_count:
 		_last_count = ceili(race_countdown)
@@ -1927,6 +1961,7 @@ func _update_race_countdown(_delta: float) -> void:
 func _update_race(delta: float) -> void:
 	var size := get_viewport_rect().size
 	rivals_node.my_distance = distance
+	rivals_node.visible = state != State.READY  # no ghosts piled on the pad before liftoff
 	rivals_node.rocket_y = rocket.position.y
 	rivals_node.rocket_x = rocket.position.x
 	rivals_node.top_limit = 58.0
@@ -2028,8 +2063,8 @@ func _ordinal(n: int) -> String:
 
 # Server messages ---------------------------------------------------------------------
 
-func _on_race_started(course_seed: int, countdown: float) -> void:
-	race_pending = {"seed": course_seed, "launch_at": Time.get_ticks_msec() + int(countdown * 1000.0)}
+func _on_race_started(course_seed: int, ready_timeout: float) -> void:
+	race_pending = {"seed": course_seed, "ready_timeout": ready_timeout, "started_at": Time.get_ticks_msec()}
 	last_results = []
 	get_tree().reload_current_scene()
 
@@ -2047,6 +2082,8 @@ func _on_rival_done(kind: String, data: Dictionary) -> void:
 
 
 func _on_rival_left(id: int) -> void:
+	if is_instance_valid(race_intro):
+		race_intro.pilot_left(id)
 	var r: Dictionary = rivals_node.rivals.get(id, {})
 	if not r.is_empty() and race_mode and state == State.PLAYING:
 		_show_toast("%s LEFT THE RACE" % str(r["name"]).to_upper(), Color(0.75, 0.78, 0.85))
