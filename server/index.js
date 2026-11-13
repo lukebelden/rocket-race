@@ -201,7 +201,7 @@ function broadcast(room, msg, exceptId) {
 }
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color };
+  return { id: p.id, name: p.name, color: p.color, character: p.character };
 }
 
 function sendRoom(room) {
@@ -226,11 +226,15 @@ function freeColor(room) {
 }
 
 function addPlayer(room, client) {
+  // Pick up the latest hangar choice (the pilot may have changed since logging in).
+  const fresh = accounts.userForToken(client.token);
+  if (fresh) client.character = fresh.profile.loadout.character;
   const player = {
     id: client.id,
     ws: client.ws,
     client,
     name: cleanName(client.username),
+    character: client.character || "duck",
     color: freeColor(room),
     status: "lobby",
     d: 0,
@@ -327,6 +331,7 @@ function handle(client, msg) {
       if (!user) return send(client.ws, { t: "auth_failed", msg: "Log in to play multiplayer." });
       client.token = msg.token;
       client.username = user.username;
+      client.character = user.profile.loadout.character;
       send(client.ws, { t: "auth_ok", username: user.username });
       break;
     }

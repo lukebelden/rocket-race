@@ -13,6 +13,7 @@ const Rivals := preload("res://rivals.gd")
 const ProfileUI := preload("res://profile_ui.gd")
 const Animals := preload("res://animals.gd")
 const PauseInput := preload("res://pause_input.gd")
+const PilotCard := preload("res://pilot_card.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -118,6 +119,11 @@ var pause_button: Button
 var _settings_from_pause := false
 var _was_boosting := false
 var _last_count := -1
+# HUD pilot cards: yours bottom right, rivals bottom left in races (pilot_card.gd)
+var player_card: Control
+var rival_cards: Dictionary = {}  # id -> card
+var rival_box: HBoxContainer
+var _rival_hull: Dictionary = {}  # id -> last hull seen (to spot hits)
 # Accounts / hangar / shop (profile.gd, profile_ui.gd)
 var profile_ui: Node
 var profile_label: Label
@@ -313,6 +319,7 @@ func _ready() -> void:
 	move_child(rivals_node, rocket.get_index())  # ghosts fly behind your own rocket
 	_make_multiplayer_ui()
 	_make_profile_ui()
+	_make_pilot_cards()
 	_apply_loadout()
 	Profile.changed.connect(_on_profile_changed)
 	Profile.rewarded.connect(_on_profile_rewarded)
@@ -372,6 +379,7 @@ func _process(delta: float) -> void:
 			_update_playing(delta)
 
 	_update_tips(delta)
+	_update_pilot_cards()
 	var show_pause := _can_pause()
 	if pause_button.visible != show_pause:
 		pause_button.visible = show_pause
@@ -419,6 +427,7 @@ func _update_layout() -> void:
 	rocket.bottom_gap = console_height + 65.0
 	_position_boost_button()
 	_position_tip_panel(console_height)
+	_position_pilot_cards(console_height)
 	# Ship mods panel mirrors the tips panel on the left side.
 	mod_panel.offset_bottom = tip_panel.offset_bottom
 	mod_panel.offset_top = mod_panel.offset_bottom - 1.0
@@ -713,6 +722,8 @@ func _tuning() -> Array:
 
 
 func _show_level_banner() -> void:
+	if player_card and level > 1:
+		player_card.react("happy", 2.0)
 	Sound.play("level")
 	level_banner.text = "LEVEL %d\n%s" % [level, String(_planet(level)["name"]).to_upper()]
 	if race_mode and level == RACE_LEVELS:
@@ -826,7 +837,8 @@ func _show_tip(text: String, urgent: bool) -> void:
 
 func _position_tip_panel(console_height: float) -> void:
 	# Above the rocket's flight row (and above the BOOST button on phones), right side.
-	var lift := 160.0 if touch_ui else 110.0
+	# Above the pilot cards that sit on the console corners.
+	var lift := 168.0 if touch_ui else 164.0
 	tip_panel.offset_bottom = -(console_height + lift)
 	tip_panel.offset_top = tip_panel.offset_bottom - 1.0  # grows upward to fit the text
 
@@ -1419,6 +1431,7 @@ func _update_missiles(delta: float) -> void:
 			Sound.play("impact", 1.5, -6.0)
 			target.queue_free()
 			score += ModInfo.MISSILE_SCORE
+			player_card.react("happy", 1.0)
 			_show_toast("TARGET DESTROYED  +%d" % int(ModInfo.MISSILE_SCORE), Color(1, 0.75, 0.4))
 			missiles.remove_at(i)
 		elif m["age"] > 3.0 or pos.y < -120.0:
@@ -1755,6 +1768,7 @@ func _on_rocket_hit(area: Area2D) -> void:
 	if hull > 0.0:
 		invulnerable = INVULNERABLE_TIME
 		Sound.play("impact")
+		player_card.react("hurt", 1.0)
 		_show_toast("IMPACT!  HULL -%d%%" % roundi(damage * 100.0), Color(1, 0.45, 0.35))
 		return
 	_hull_breach()
@@ -1815,6 +1829,7 @@ func _begin_race(info: Dictionary) -> void:
 		var id := int(p.get("id", 0))
 		if id != Net.my_id:
 			rivals_node.add_rival(id, str(p.get("name", "Pilot")), Color.html(str(p.get("color", "#ffffff"))))
+			_add_rival_card(id, p)
 	_show_menu()
 	_go_to_pad()
 	race_launch_at = int(info.get("launch_at", Time.get_ticks_msec() + 3000))
@@ -1960,6 +1975,9 @@ func _on_rival_left(id: int) -> void:
 	if not r.is_empty() and race_mode and state == State.PLAYING:
 		_show_toast("%s LEFT THE RACE" % str(r["name"]).to_upper(), Color(0.75, 0.78, 0.85))
 	rivals_node.remove_rival(id)
+	if rival_cards.has(id):
+		rival_cards[id].queue_free()
+		rival_cards.erase(id)
 	_refresh_race_over()
 
 
@@ -2301,7 +2319,11 @@ func _apply_loadout() -> void:
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
 	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
-	rocket.pilot = Profile.character()
+	rocket.pilot = ""  # pilots sit at the HUD console now, not in the ship window
+	if player_card:
+		player_card.animal = Profile.character()
+		player_card.pilot_name = Profile.username if Profile.is_account() else "Guest"
+		player_card.accent = Color.html(str(d.get("main", "#db3333"))).lightened(0.15)
 	var fitted: Array[String] = []
 	for id in Profile.loadout()["mods"]:
 		fitted.append(str(id))
@@ -2329,6 +2351,8 @@ func _give_run_reward() -> void:
 	var reward: Dictionary = await Profile.report_run(int(score), level)
 	if reward.is_empty() or not is_instance_valid(result_label) or state != State.OVER:
 		return
+	if int(reward.get("level_after", 1)) > int(reward.get("level_before", 1)):
+		player_card.react("excited", 3.0)
 	Sound.play("levelup" if int(reward.get("level_after", 1)) > int(reward.get("level_before", 1)) else "coin")
 	result_label.text += "\n\n" + _reward_text(reward)
 
@@ -2525,6 +2549,117 @@ func _set_volume(bus: String, v: float) -> void:
 		"Effects": vol_sfx = v
 		_: vol_master = v
 	Sound.set_volume(bus, v)
+
+
+# --- HUD pilot cards ------------------------------------------------------------------
+
+func _make_pilot_cards() -> void:
+	player_card = PilotCard.new()
+	player_card.big = true
+	player_card.animal = Profile.character()
+	player_card.pilot_name = Profile.username if Profile.is_account() else "Guest"
+	player_card.visible = false
+	$UI/Root.add_child(player_card)
+	$UI/Root.move_child(player_card, cockpit.get_index())  # behind the console frame's edge
+	rival_box = HBoxContainer.new()
+	rival_box.add_theme_constant_override("separation", 8)
+	rival_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rival_box.visible = false
+	$UI/Root.add_child(rival_box)
+	$UI/Root.move_child(rival_box, cockpit.get_index())
+	_position_pilot_cards(cockpit.dash_height)
+
+
+## Bottom corners, sitting on top of the cockpit console. On phones they move inward,
+## clear of the round BOOST / MISSILE buttons.
+func _position_pilot_cards(console_height: float) -> void:
+	if player_card == null:
+		return
+	var side := 30.0 + (128.0 + 14.0 if touch_ui else 0.0)
+	var card_size: Vector2 = player_card.custom_minimum_size
+	player_card.anchor_left = 1.0
+	player_card.anchor_right = 1.0
+	player_card.anchor_top = 1.0
+	player_card.anchor_bottom = 1.0
+	player_card.offset_right = -side
+	player_card.offset_left = -side - card_size.x
+	player_card.offset_bottom = -console_height + 4.0
+	player_card.offset_top = player_card.offset_bottom - card_size.y
+	rival_box.anchor_top = 1.0
+	rival_box.anchor_bottom = 1.0
+	rival_box.offset_left = side
+	rival_box.offset_bottom = -console_height + 4.0
+	rival_box.offset_top = rival_box.offset_bottom - 108.0
+	rival_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+
+
+func _add_rival_card(id: int, info: Dictionary) -> void:
+	var card := PilotCard.new()
+	card.big = false
+	card.animal = str(info.get("character", "duck"))
+	card.pilot_name = str(info.get("name", "Pilot"))
+	card.accent = Color.html(str(info.get("color", "#ffffff")))
+	rival_box.add_child(card)
+	rival_cards[id] = card
+
+
+## Every frame: moods follow the flight, badges show race places, and cards fade while your
+## rocket flies behind them.
+func _update_pilot_cards() -> void:
+	var show_cards := state != State.MENU
+	if player_card.visible != show_cards:
+		player_card.visible = show_cards
+	var show_rivals := show_cards and race_mode and not rival_cards.is_empty()
+	if rival_box.visible != show_rivals:
+		rival_box.visible = show_rivals
+	if not show_cards:
+		return
+
+	var m := "normal"
+	if state == State.OVER:
+		m = "out" if hull <= 0.0 else "happy"
+	elif state == State.DOCKED:
+		m = "happy"
+	elif rocket.boosting:
+		m = "excited"
+	elif hull <= 0.3:
+		m = "worried"
+	player_card.base_mood = m
+	if race_mode:
+		if my_finish_place > 0:
+			player_card.badge = _ordinal(my_finish_place)
+		elif race_done:
+			player_card.badge = "OUT"
+		elif state == State.PLAYING or state == State.DOCKED:
+			player_card.badge = _ordinal(rivals_node.my_place(false))
+		else:
+			player_card.badge = ""
+
+	for id in rival_cards:
+		var card: Control = rival_cards[id]
+		var r: Dictionary = rivals_node.rivals.get(id, {})
+		if r.is_empty():
+			continue
+		var hull_now := float(r["hull"])
+		if hull_now < float(_rival_hull.get(id, hull_now)) - 0.05:
+			card.react("hurt", 1.0)
+		_rival_hull[id] = hull_now
+		match str(r["status"]):
+			"crashed":
+				card.base_mood = "out"
+				card.badge = "OUT"
+			"finished":
+				card.base_mood = "happy"
+				card.badge = "FINISHED"
+			_:
+				card.base_mood = "excited" if r["boost"] else ("worried" if hull_now <= 0.3 else "normal")
+				card.badge = ""
+
+	# Don't hide your own rocket: fade a card while the rocket is behind it.
+	for card in [player_card] + rival_cards.values():
+		var behind: bool = (card as Control).get_global_rect().grow(36.0).has_point(rocket.position)
+		var target := 0.3 if behind else 1.0
+		card.modulate.a = move_toward(card.modulate.a, target, get_process_delta_time() * 4.0)
 
 
 # --- Drawing -----------------------------------------------------------------

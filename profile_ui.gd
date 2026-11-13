@@ -195,7 +195,6 @@ func _rocket_preview(parent: Control) -> void:
 	r.paint_main = Color.html(str(d.get("main", "#db3333")))
 	r.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	r.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
-	r.pilot = Profile.character()
 	r.mods.assign(Profile.loadout()["mods"])
 	r.missile_count = 5
 	r.scale = Vector2.ONE * 1.8 * float(Profile.ship().get("size", 1.0))
