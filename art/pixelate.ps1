@@ -1,11 +1,11 @@
-# Turns the toon renders into pixel-art sprites (art/renders/pixel_<animal>_full.png) and
+# Turns the 2D pilot art (svg_<animal>.png) into pixel-art sprites (art/renders/pixel_<animal>_full.png) and
 # builds design-preview/toon-lineup.png (sticker row + pixel row for all 8 pilots).
 #   powershell -NoProfile -File art/pixelate.ps1
 Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $PSScriptRoot
 $dir = Join-Path $PSScriptRoot "renders"
 $animals = "duck","mouse","dog","cat","bear","raccoon","monkey","penguin"
-$sw = 80; $sh = 117; $up = 5   # sprite size and preview scale
+$sw = 80; $sh = 104   # pixel sprite size (SVG art is 200x260)
 
 function Pixelate($src, $dst) {
   $img = [System.Drawing.Image]::FromFile($src)
@@ -35,10 +35,10 @@ $sf = New-Object System.Drawing.StringFormat; $sf.Alignment = "Center"
 $g.DrawString("STICKER", $small, $dim, 10, 6); $g.DrawString("PIXEL", $small, $dim, 10, 660)
 for ($i = 0; $i -lt 8; $i++) {
   $a = $animals[$i]; $x = $i * $cw
-  $full = Join-Path $dir "toon_${a}_full.png"
+  $full = Join-Path $dir "svg_${a}.png"
   $g.InterpolationMode = "HighQualityBicubic"
-  $f = [System.Drawing.Image]::FromFile($full); $g.DrawImage($f, $x + 10, 30, 280, 410); $f.Dispose()
-  $f = [System.Drawing.Image]::FromFile((Join-Path $dir "toon_${a}_face.png")); $g.DrawImage($f, $x + 50, 440, 200, 200); $f.Dispose()
+  $f = [System.Drawing.Image]::FromFile($full); $g.DrawImage($f, $x + 10, 30, 280, 364); $f.Dispose()
+  $f = [System.Drawing.Image]::FromFile($full); $g.DrawImage($f, [System.Drawing.Rectangle]::new($x + 50, 440, 200, 200), [System.Drawing.Rectangle]::new(90, 0, 420, 420), "Pixel"); $f.Dispose()
   $px = Pixelate $full (Join-Path $dir "pixel_${a}_full.png")
   $g.InterpolationMode = "NearestNeighbor"; $g.PixelOffsetMode = "Half"
   $g.DrawImage($px, $x + 150 - ($sw * 3.4 / 2), 680, $sw * 3.4, $sh * 3.4); $px.Dispose()
