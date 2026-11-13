@@ -142,4 +142,5 @@ func _draw() -> void:
 
 	var closed := _outline.duplicate()
 	closed.append(_outline[0])
-	draw_polyline(closed, _color.darkened(0.5), 1.5, true)
+	# Not antialiased: antialiased lines vanish when baked into the transparent atlas.
+	draw_polyline(closed, _color.darkened(0.5), 2.0)

@@ -20,8 +20,10 @@ func _ready() -> void:
 	_make_buses()
 	# Every button in the game clicks.
 	get_tree().node_added.connect(func(n: Node) -> void:
-		if n is BaseButton:
-			n.pressed.connect(play.bind("click")))
+		# (Buttons moved to a new parent are "added" again: only connect once.)
+		var click := play.bind("click")
+		if n is BaseButton and not n.pressed.is_connected(click):
+			n.pressed.connect(click))
 	for i in 8:
 		var p := AudioStreamPlayer.new()
 		p.bus = BUS_SFX

@@ -1649,7 +1649,11 @@ func _bake_asteroid_atlas() -> void:
 		art.position = Obstacle.atlas_region(i).get_center()
 		art.monitoring = false
 		art.monitorable = false
-		art.set_process(false)
+		# Must stay put while the atlas is captured. (set_process(false) is not enough: Godot
+		# turns _process back on when the node enters the tree, and the rocks would drift down
+		# into the next row of the atlas - asteroids then look sliced.)
+		art.process_mode = Node.PROCESS_MODE_DISABLED
+		art.fall_speed = 0.0
 		viewport.add_child(art)
 	var glow := Sprite2D.new()
 	glow.texture = glow_tex
@@ -2655,9 +2659,16 @@ func _update_pilot_cards() -> void:
 				card.base_mood = "excited" if r["boost"] else ("worried" if hull_now <= 0.3 else "normal")
 				card.badge = ""
 
-	# Don't hide your own rocket: fade a card while the rocket is behind it.
+	# Don't hide your rocket or incoming asteroids: fade a card while either is behind it.
 	for card in [player_card] + rival_cards.values():
-		var behind: bool = (card as Control).get_global_rect().grow(36.0).has_point(rocket.position)
+		var rect: Rect2 = (card as Control).get_global_rect()
+		var behind: bool = rect.grow(36.0).has_point(rocket.position)
+		if not behind:
+			for rock in obstacles.get_children():
+				var reach: float = rock.radius if rock.get_script() == Obstacle else 60.0
+				if rect.grow(reach).has_point(rock.position):
+					behind = true
+					break
 		var target := 0.3 if behind else 1.0
 		card.modulate.a = move_toward(card.modulate.a, target, get_process_delta_time() * 4.0)
 
