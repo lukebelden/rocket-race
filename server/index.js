@@ -31,7 +31,8 @@ const INTRO_MS = 3600;
 // Pre-race pilot intro: how long players get to press Ready before it's done for them.
 const READY_TIMEOUT_MS = 30000;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I / O (look like 1 / 0)
-const COLORS = ["#4fc3ff", "#ff6b5e", "#7dff8a", "#ffd34d"];
+// Racer colours from the game palette (palette.gd): distinct but calm.
+const COLORS = ["#4fb8a8", "#f0893c", "#5aa9e6", "#9a73d6"];
 // Must match game.gd: LEVEL_DURATION (distance per level) and RACE_LEVELS.
 const LEVEL_DURATION = 26;
 const RACE_LEVELS = 5;

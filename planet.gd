@@ -1,4 +1,6 @@
 extends Node2D
+
+const Palette := preload("res://palette.gd")
 ## The planet you're flying past. Drawn once when the level changes; game.gd just moves it
 ## each frame (moving a node is nearly free, redrawing all these shapes every frame is not).
 
@@ -19,15 +21,18 @@ func _draw() -> void:
 	var color: Color = data["color"]
 	var style: String = data["style"]
 
-	# Soft glow around the gas and ice giants (thin atmosphere halo).
+	# Flat soft halo around the gas and ice giants (thin atmosphere).
 	if style != "craters" and style != "polar":
-		draw_texture_rect(glow_tex, Rect2(-Vector2(r, r) * 1.3, Vector2(r, r) * 2.6), false, Color(color.lightened(0.2), 0.3))
+		Palette.glow(self, Vector2.ZERO, r * 1.35, color.lightened(0.15), 1.4)
 
 	if style == "rings":
 		_draw_ring(r, color, true)
 
+	# Flat two-tone sphere: the whole disc in shadow, then the lit face (offset towards the
+	# light at the top-left), leaving a darker crescent on the far side.
 	var body := circle_points(Vector2.ZERO, r, 96)
-	draw_colored_polygon(body, color)
+	draw_colored_polygon(body, color.darkened(0.28))
+	draw_colored_polygon(circle_points(Vector2(-0.08, -0.08) * r, r * 0.87, 96), color)
 
 	# Surface features are semi-transparent so the shading shows through.
 	match style:
@@ -35,8 +40,7 @@ func _draw() -> void:
 			for crater in [Vector3(-0.35, -0.2, 0.18), Vector3(0.3, 0.25, 0.14), Vector3(0.1, -0.45, 0.1),
 					Vector3(-0.1, 0.45, 0.12), Vector3(0.45, -0.2, 0.08), Vector3(-0.55, 0.25, 0.07), Vector3(0.6, 0.35, 0.06)]:
 				var pos := Vector2(crater.x, crater.y) * r
-				draw_circle(pos + Vector2(-1, -1) * crater.z * r * 0.15, crater.z * r * 1.05, Color(1, 1, 1, 0.12))  # rim light
-				draw_circle(pos, crater.z * r, Color(color.darkened(0.35), 0.55))
+				draw_circle(pos, crater.z * r, color.darkened(0.16))
 		"polar":
 			draw_colored_polygon(_band_points(r, -r * 0.97, -r * 0.72), Color(0.97, 0.95, 0.95, 0.9))
 			draw_colored_polygon(_band_points(r, r * 0.8, r * 0.95), Color(0.97, 0.95, 0.95, 0.6))
@@ -55,8 +59,6 @@ func _draw() -> void:
 		draw_colored_polygon(_ellipse_points(at, r * 0.24, r * 0.13), Color(spot.lightened(0.2), 0.5))
 		draw_colored_polygon(_ellipse_points(at, r * 0.18, r * 0.09), spot)
 
-	# Smooth sphere shading on top of everything: lit from the top-left, dark on the far side.
-	draw_colored_polygon(body, Color.WHITE, _circle_uvs(96), shade_tex)
 
 	if style == "rings":
 		_draw_ring(r, color, false)

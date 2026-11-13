@@ -15,6 +15,7 @@ const PauseInput := preload("res://pause_input.gd")
 const PilotCard := preload("res://pilot_card.gd")
 const HangarBG := preload("res://hangar_bg.gd")
 const RaceIntro := preload("res://race_intro.gd")
+const Palette := preload("res://palette.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -44,12 +45,13 @@ const INTRO_DURATION := 3.6
 
 ## One entry per level, in order. After the last one, levels continue as "Deep Space".
 const PLANETS := [
-	{"name": "The Moon", "color": Color(0.78, 0.78, 0.8), "rock": Color(0.5, 0.5, 0.53), "style": "craters", "radius": 150.0},
-	{"name": "Mars", "color": Color(0.86, 0.42, 0.24), "rock": Color(0.62, 0.32, 0.22), "style": "polar", "radius": 165.0},
-	{"name": "Jupiter", "color": Color(0.86, 0.72, 0.54), "rock": Color(0.6, 0.5, 0.4), "style": "bands", "radius": 250.0, "spot": Color(0.78, 0.33, 0.22)},
-	{"name": "Saturn", "color": Color(0.92, 0.82, 0.56), "rock": Color(0.62, 0.56, 0.4), "style": "rings", "radius": 190.0},
-	{"name": "Uranus", "color": Color(0.56, 0.86, 0.9), "rock": Color(0.42, 0.6, 0.66), "style": "plain", "radius": 175.0},
-	{"name": "Neptune", "color": Color(0.26, 0.42, 0.92), "rock": Color(0.34, 0.4, 0.62), "style": "bands", "radius": 175.0, "spot": Color(0.1, 0.16, 0.45)},
+	# Soft flat colours that sit in the palette (palette.gd); rocks are the planet's dust.
+	{"name": "The Moon", "color": Color("b7c3cf"), "rock": Color("6e7b93"), "style": "craters", "radius": 150.0},
+	{"name": "Mars", "color": Color("d9774a"), "rock": Color("8c4a37"), "style": "polar", "radius": 165.0},
+	{"name": "Jupiter", "color": Color("d6b088"), "rock": Color("8a7360"), "style": "bands", "radius": 250.0, "spot": Color("b9502c")},
+	{"name": "Saturn", "color": Color("e2cc92"), "rock": Color("8f8462"), "style": "rings", "radius": 190.0},
+	{"name": "Uranus", "color": Color("8fd6cf"), "rock": Color("4f8a88"), "style": "plain", "radius": 175.0},
+	{"name": "Neptune", "color": Color("4f74c9"), "rock": Color("46557f"), "style": "bands", "radius": 175.0, "spot": Color("262d52")},
 ]
 
 const STATION_SPEED := 110.0
@@ -63,8 +65,9 @@ const INVULNERABLE_TIME := 1.3
 const TIP_TIME := 8.0
 const URGENT_TIP_TIME := 9.0
 
-const SKY_BLUE := Color(0.36, 0.62, 0.95)
-const SPACE_DARK := Color(0.03, 0.03, 0.08)
+# Night launch: deep teal sky fading to ink-navy space (palette.gd).
+const SKY_BLUE := Color("234a5c")
+const SPACE_DARK := Color("12152a")
 
 @export var start_spawn_interval: float = 0.95
 @export var min_spawn_interval: float = 0.25
@@ -1018,14 +1021,14 @@ func _update_dashboard() -> void:
 	caution_light.on = low_fuel
 	_set_modulate(caution_label, Color(1.6, 1.2, 1.2) if low_fuel else Color.WHITE)
 	if not rocket.has_booster:
-		_set_label(fuel_label, "BOOSTER LOST", Color(1, 0.4, 0.35))
+		_set_label(fuel_label, "BOOSTER LOST", Palette.BAD)
 		_set_modulate(boost_bar, Color(1, 1, 1, 0.4))
 	else:
-		var color := Color(1.0, 0.25, 0.2) if low_fuel else Color(1.0, 0.6, 0.15)
+		var color := Palette.BAD if low_fuel else Palette.ORANGE
 		if rocket.boosting:
 			color = color.lightened(0.3)
 		_set_fill(boost_bar, color)
-		_set_label(fuel_label, ("FUEL LOW" if low_fuel else "BOOST FUEL") + ("" if touch_ui else "  [W / Shift]"), Color(1, 0.75, 0.35))
+		_set_label(fuel_label, ("FUEL LOW" if low_fuel else "BOOST FUEL") + ("" if touch_ui else "  [W / Shift]"), Palette.AMBER)
 
 	# Hull integrity: green -> yellow -> red, flashing when critical. The bar's full length
 	# is the max hull (150% with the Reinforced Hull mod).
@@ -1033,7 +1036,7 @@ func _update_dashboard() -> void:
 		hull_bar.max_value = hull_max
 	if not is_equal_approx(hull_bar.value, hull):
 		hull_bar.value = hull
-	var hull_color := Color(0.3, 0.9, 0.45) if hull > 0.6 else (Color(1.0, 0.8, 0.2) if hull > 0.3 else Color(1.0, 0.3, 0.25))
+	var hull_color := Palette.AQUA if hull > 0.6 else (Palette.AMBER if hull > 0.3 else Palette.BAD)
 	_set_fill(hull_bar, hull_color)
 	_set_label(hull_label, "HULL INTEGRITY  %d%%" % roundi(hull * 100.0), hull_color.lightened(0.2))
 	var hull_alpha := 0.55 + 0.45 * absf(sin(clock * 6.0)) if hull <= 0.3 else 1.0
@@ -2968,140 +2971,148 @@ func _draw_earth(size: Vector2) -> void:
 	var radius := lerpf(size.x * 2.2, size.x * 0.5, smoothstep(0.0, 0.8, rise))
 	# Ground surface sits just under the rocket's fins.
 	var top: float = size.y - rocket.bottom_gap + 33.0 + offset
-	if top - 40.0 > size.y:
-		return
 	var center := Vector2(size.x / 2.0, top + radius)
 	var spread := minf(1.0, size.x * 0.9 / radius)  # keeps features on screen at any size
 
-	# Landscape around the launch site, sitting on Earth's curve: fades out as you climb.
+	# Night sky: a big soft moon (drifts down a little as you climb).
+	var moon := Vector2(size.x * 0.76, size.y * 0.24 + offset * 0.35)
+	var moon_r := minf(size.x, size.y) * 0.075
+	var sky_fade := 1.0 - _space_amount()
+	Palette.glow(self, moon, moon_r * 3.0, Palette.MIST, 1.3 * sky_fade)
+	draw_circle(moon, moon_r, Color(Palette.MIST, 0.95 * sky_fade))
+	if top - 40.0 > size.y:
+		return
+
+	# Night city around the launch site, standing on Earth's curve: fades out as you climb.
 	var land_fade := 1.0 - smoothstep(0.25, 0.6, rise)
 	if land_fade > 0.0:
 		_draw_landscape(size, center, radius, land_fade)
 
-	# Atmosphere: layered glow.
+	# Atmosphere: flat haze rings.
 	for i in 3:
-		draw_colored_polygon(_circle_points(center, radius + 36.0 - i * 11.0), Color(0.55, 0.8, 1.0, 0.1 + 0.07 * i))
-	# Oceans: deep blue with shallower water near the coasts.
-	draw_colored_polygon(_circle_points(center, radius), Color(0.12, 0.36, 0.78))
-	draw_colored_polygon(_circle_points(center + Vector2(0, radius * 0.05), radius * 0.95), Color(0.09, 0.28, 0.66))
+		draw_colored_polygon(_circle_points(center, radius + 36.0 - i * 11.0), Color(Palette.MIST, 0.06 + 0.05 * i))
+	# Night oceans: teal, deeper towards the far side.
+	draw_colored_polygon(_circle_points(center, radius), Palette.TEAL)
+	draw_colored_polygon(_circle_points(center + Vector2(radius * 0.06, radius * 0.06), radius * 0.94), Palette.TEAL_DEEP)
 
-	# Continents: irregular shapes with forests, grassland, deserts and snowy mountains.
+	# Continents: flat shapes in a few muted tones (land, lighter land, sand, snowy peaks).
 	# [angle along the surface, size, shape seed, has desert, has mountains]
 	var lands := [[-0.5, 1.0, 1.3, false, true], [-0.22, 1.35, 4.1, true, false], [0.08, 0.85, 2.2, false, false],
 		[0.33, 1.25, 7.7, true, true], [0.58, 0.8, 5.5, false, false], [-0.72, 0.6, 9.1, false, false]]
 	var land_size := minf(radius * 0.15, size.x * 0.085)
-	for land in lands:
-		var angle: float = -PI / 2.0 + float(land[0]) * spread
-		var blob: float = land_size * float(land[1])
+	var land := Color("3f8a74")
+	for spec in lands:
+		var angle: float = -PI / 2.0 + float(spec[0]) * spread
+		var blob: float = land_size * float(spec[1])
 		var pos: Vector2 = center + Vector2.from_angle(angle) * (radius - blob * 0.95)
-		var seed: float = land[2]
-		draw_colored_polygon(_blob(pos + Vector2(0, blob * 0.08), blob * 1.08, seed), Color(0.55, 0.75, 0.55, 0.5))  # shallows
-		draw_colored_polygon(_blob(pos, blob, seed), Color(0.22, 0.56, 0.28))
-		draw_colored_polygon(_blob(pos + Vector2(-blob * 0.2, -blob * 0.15), blob * 0.55, seed + 1.0), Color(0.32, 0.66, 0.34))
-		if land[3]:
-			draw_colored_polygon(_blob(pos + Vector2(blob * 0.3, blob * 0.1), blob * 0.38, seed + 2.0), Color(0.85, 0.74, 0.48))
-		if land[4]:
+		var seed: float = spec[2]
+		draw_colored_polygon(_blob(pos, blob, seed), land)
+		draw_colored_polygon(_blob(pos + Vector2(-blob * 0.2, -blob * 0.15), blob * 0.55, seed + 1.0), land.lightened(0.12))
+		if spec[3]:
+			draw_colored_polygon(_blob(pos + Vector2(blob * 0.3, blob * 0.1), blob * 0.38, seed + 2.0), Color("c9a46a"))
+		if spec[4]:
 			for k in 3:
 				var m := pos + Vector2((k - 1) * blob * 0.22, -blob * 0.05 + absf(k - 1) * blob * 0.08)
 				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.14, blob * 0.1), m + Vector2(0, -blob * 0.16),
-					m + Vector2(blob * 0.14, blob * 0.1)]), Color(0.4, 0.38, 0.34))
+					m + Vector2(blob * 0.14, blob * 0.1)]), Palette.SLATE)
 				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.05, -blob * 0.1), m + Vector2(0, -blob * 0.16),
-					m + Vector2(blob * 0.05, -blob * 0.1)]), Color(0.95, 0.96, 1.0))
-	# Polar ice cap (visible once Earth is a ball below you).
-	if rise > 0.5:
+					m + Vector2(blob * 0.05, -blob * 0.1)]), Palette.MIST)
+	if rise > 0.5:  # polar ice cap, once Earth is a ball below you
 		var cap := center + Vector2(0, -radius * 0.9)
-		draw_colored_polygon(_blob(cap, radius * 0.16, 3.3), Color(0.94, 0.97, 1.0, smoothstep(0.5, 0.8, rise)))
-	# Weather: soft cloud swirls over the surface.
-	for i in 7:
+		draw_colored_polygon(_blob(cap, radius * 0.16, 3.3), Color(Palette.MIST, smoothstep(0.5, 0.8, rise)))
+	for i in 7:  # moonlit cloud swirls
 		var a := -PI / 2.0 + (i - 3) * 0.17 * spread + 0.05
 		var p := center + Vector2.from_angle(a) * (radius - land_size * (0.4 + 0.35 * (i % 3)))
-		draw_colored_polygon(_blob(p, land_size * (0.35 + 0.1 * (i % 2)), 11.0 + i), Color(1, 1, 1, 0.35))
-	# Sphere shading: lit from the top left, darker on the far side.
-	draw_texture_rect(shade_tex, Rect2(center - Vector2(radius, radius), Vector2(radius, radius) * 2.0), false, Color(1, 1, 1, 0.6))
+		draw_colored_polygon(_blob(p, land_size * (0.35 + 0.1 * (i % 2)), 11.0 + i), Color(Palette.MIST, 0.3))
 
-	# Launch complex: pad with hazard stripes, service tower, blast walls and lights.
+	# Launch complex: dark pad with an amber stripe, flat tower, floodlights and a bunker.
 	var pad_x := size.x / 2.0
-	draw_rect(Rect2(pad_x - 120.0, top - 4.0, 240.0, 8.0), Color(0.3, 0.32, 0.35))  # apron
-	draw_rect(Rect2(pad_x - 64.0, top - 10.0, 128.0, 12.0), Color(0.42, 0.44, 0.48))
-	for i in 8:
-		if i % 2 == 0:
-			draw_rect(Rect2(pad_x - 64.0 + i * 16.0, top - 10.0, 16.0, 3.0), Color(0.95, 0.75, 0.15))
+	draw_rect(Rect2(pad_x - 120.0, top - 4.0, 240.0, 8.0), Palette.INK)  # apron
+	draw_rect(Rect2(pad_x - 64.0, top - 10.0, 128.0, 12.0), Palette.SLATE)
+	draw_rect(Rect2(pad_x - 54.0, top - 10.0, 108.0, 3.0), Color(Palette.AMBER, 0.85))
 	for s in [-1.0, 1.0]:  # blast deflector walls
 		draw_colored_polygon(PackedVector2Array([Vector2(pad_x + s * 64.0, top - 10), Vector2(pad_x + s * 84, top - 2),
-			Vector2(pad_x + s * 84, top + 2), Vector2(pad_x + s * 64, top + 2)]), Color(0.35, 0.37, 0.4))
-	var tc := Color(0.55, 0.3, 0.25)
-	draw_rect(Rect2(pad_x + 38.0, top - 96.0, 4.0, 86.0), tc)
-	draw_rect(Rect2(pad_x + 50.0, top - 96.0, 4.0, 86.0), tc)
+			Vector2(pad_x + s * 84, top + 2), Vector2(pad_x + s * 64, top + 2)]), Palette.INDIGO)
+	draw_rect(Rect2(pad_x + 38.0, top - 96.0, 5.0, 86.0), Palette.INDIGO)
+	draw_rect(Rect2(pad_x + 50.0, top - 96.0, 5.0, 86.0), Palette.INDIGO)
 	for i in 6:
-		var y := top - 96.0 + i * 14.0
-		draw_line(Vector2(pad_x + 42, y), Vector2(pad_x + 50, y + 14), tc.darkened(0.2), 1.5)
-		draw_line(Vector2(pad_x + 50, y), Vector2(pad_x + 42, y + 14), tc.darkened(0.2), 1.5)
-	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 34.0, 5.0), tc)  # service arm
+		draw_rect(Rect2(pad_x + 43.0, top - 92.0 + i * 14.0, 7.0, 3.0), Palette.INDIGO)
+	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 34.0, 5.0), Palette.INDIGO)  # service arm
 	var blink := fmod(clock, 1.2) < 0.6
-	draw_circle(Vector2(pad_x + 46.0, top - 101.0), 3.0, Color(1, 0.25, 0.2) if blink else Color(0.4, 0.1, 0.1))
-	for s in [-1.0, 1.0]:  # floodlight masts
+	if blink:
+		Palette.glow(self, Vector2(pad_x + 46.0, top - 101.0), 12.0, Palette.ORANGE)
+	draw_circle(Vector2(pad_x + 46.0, top - 101.0), 3.0, Palette.ORANGE if blink else Palette.RUST.darkened(0.4))
+	for s in [-1.0, 1.0]:  # floodlight masts with warm lamps
 		var lx: float = pad_x + s * 105.0
-		draw_line(Vector2(lx, top - 4), Vector2(lx, top - 44), Color(0.5, 0.52, 0.56), 2.0)
-		draw_rect(Rect2(lx - 5, top - 48, 10, 5), Color(1, 0.95, 0.75))
-	draw_rect(Rect2(pad_x - 150.0, top - 18.0, 26.0, 14.0), Color(0.75, 0.77, 0.8))  # control bunker
-	draw_rect(Rect2(pad_x - 146.0, top - 14.0, 6.0, 4.0), Color(0.5, 0.8, 1.0))
-	draw_rect(Rect2(pad_x - 136.0, top - 14.0, 6.0, 4.0), Color(0.5, 0.8, 1.0))
+		draw_rect(Rect2(lx - 1, top - 44, 3, 40), Palette.INDIGO)
+		Palette.glow(self, Vector2(lx, top - 46), 22.0, Palette.AMBER)
+		draw_rect(Rect2(lx - 6, top - 49, 12, 5), Palette.AMBER)
+	draw_rect(Rect2(pad_x - 150.0, top - 18.0, 28.0, 14.0), Palette.INDIGO)  # control bunker
+	draw_rect(Rect2(pad_x - 146.0, top - 14.0, 6.0, 4.0), Palette.AMBER)
+	draw_rect(Rect2(pad_x - 136.0, top - 14.0, 6.0, 4.0), Palette.AMBER)
 
 
-## Distant mountains, rolling hills with trees, and a few buildings, all standing on the
-## curve of the Earth so they line up with the ground at any screen size.
+## Night city on the curve of the Earth: misty far skyline, then domed towers and blocks
+## with warm windows, then dark ground - like the reference art. Lines up at any screen size.
 func _draw_landscape(size: Vector2, center: Vector2, radius: float, fade: float) -> void:
 	var ground := func(x: float) -> float:
 		var dx := clampf(x - center.x, -radius, radius)
 		return center.y - sqrt(radius * radius - dx * dx)
-	var step := 12.0
-	# Far mountains: hazy blue with snowy peaks.
-	var far := PackedVector2Array()
-	var peaks: Array[Vector2] = []
-	var x := -step
-	while x <= size.x + step:
-		var hgt := 55.0 + 45.0 * sin(x * 0.011 + 1.3) + 30.0 * sin(x * 0.027 + 0.4) + 14.0 * sin(x * 0.061)
-		var p := Vector2(x, ground.call(x) - maxf(hgt, 18.0))
-		far.append(p)
-		if hgt > 95.0:
-			peaks.append(p)
-		x += step
-	far.append(Vector2(size.x + step, ground.call(size.x + step) + 4.0))
-	far.append(Vector2(-step, ground.call(-step) + 4.0))
-	draw_colored_polygon(far, Color(0.5, 0.62, 0.8, 0.9 * fade))
-	for p in peaks:
-		draw_colored_polygon(PackedVector2Array([p + Vector2(-9, 9), p + Vector2(0, -1), p + Vector2(9, 9)]), Color(0.96, 0.97, 1.0, 0.9 * fade))
-	# Near hills: green, with little pine trees along the tops.
-	var near := PackedVector2Array()
-	x = -step
-	var trees: Array[Vector2] = []
-	while x <= size.x + step:
-		var hgt := 24.0 + 16.0 * sin(x * 0.019 + 2.1) + 10.0 * sin(x * 0.047 + 0.9)
-		var p := Vector2(x, ground.call(x) - hgt)
-		near.append(p)
-		if absf(x - size.x / 2.0) > 150.0 and int(x / step) % 3 == 0:
-			trees.append(p)
-		x += step
-	near.append(Vector2(size.x + step, ground.call(size.x + step) + 4.0))
-	near.append(Vector2(-step, ground.call(-step) + 4.0))
-	draw_colored_polygon(near, Color(0.28, 0.55, 0.3, fade))
-	for t in trees:
-		for k in 2:
-			var tp := t + Vector2(k * 7.0 - 3.0, 2.0)
-			draw_colored_polygon(PackedVector2Array([tp + Vector2(-5, 2), tp + Vector2(0, -12), tp + Vector2(5, 2)]),
-				Color(0.15, 0.38, 0.2, fade))
-	# A few buildings out past the launch site (hangar, offices, tower).
 	var base := size.x / 2.0
-	for spec in [[-260.0, 70.0, 34.0, Color(0.7, 0.72, 0.76)], [-185.0, 30.0, 52.0, Color(0.62, 0.66, 0.72)],
-			[210.0, 54.0, 26.0, Color(0.72, 0.7, 0.66)], [275.0, 22.0, 64.0, Color(0.66, 0.68, 0.74)]]:
+
+	# Far skyline: blocky silhouettes in haze (teal, low contrast).
+	var far := Color(Palette.hazed(Palette.TEAL, 0.35), fade)
+	var x := -10.0
+	var i := 0
+	while x < size.x + 10.0:
+		var w := 26.0 + 18.0 * absf(sin(i * 1.7))
+		var h := 40.0 + 55.0 * absf(sin(i * 0.9 + 0.5)) + 30.0 * absf(sin(i * 2.3))
+		var gy: float = ground.call(x + w / 2.0)
+		draw_rect(Rect2(x, gy - h, w - 3.0, h + 6.0), far)
+		if i % 4 == 1:  # antenna
+			draw_rect(Rect2(x + w / 2.0 - 1.0, gy - h - 16.0, 2.0, 16.0), far)
+		x += w
+		i += 1
+
+	# Mid city: dark towers with domes and rows of warm windows, kept clear of the pad.
+	var mid := Color(Palette.INDIGO, fade)
+	for spec in [[-430.0, 46.0, 120.0, true], [-330.0, 70.0, 64.0, false], [-245.0, 34.0, 150.0, true],
+			[-170.0, 58.0, 48.0, false], [180.0, 52.0, 70.0, false], [255.0, 36.0, 140.0, true],
+			[340.0, 80.0, 56.0, false], [440.0, 44.0, 110.0, true]]:
 		var bx: float = base + float(spec[0])
+		if bx < -60.0 or bx > size.x + 60.0:
+			continue
+		var bw: float = spec[1]
+		var bh: float = spec[2]
 		var gy: float = ground.call(bx)
-		var r := Rect2(bx - float(spec[1]) / 2.0, gy - float(spec[2]), spec[1], spec[2] + 6.0)
-		var col: Color = spec[3]
-		draw_rect(r, Color(col, fade))
-		for wy in range(int(r.position.y) + 6, int(gy) - 4, 9):  # lit windows
-			for wx in range(int(r.position.x) + 4, int(r.end.x) - 4, 8):
-				draw_rect(Rect2(wx, wy, 4, 4), Color(0.55, 0.8, 1.0, 0.75 * fade))
+		var r := Rect2(bx - bw / 2.0, gy - bh, bw, bh + 6.0)
+		draw_rect(r, mid)
+		draw_rect(Rect2(r.end.x - bw * 0.28, r.position.y, bw * 0.28, r.size.y), Color(Palette.INDIGO.darkened(0.2), fade))
+		if spec[3]:  # dome + spire on the towers
+			draw_circle(Vector2(bx, r.position.y), bw * 0.5, mid)
+			draw_rect(Rect2(bx - 1.5, r.position.y - bw * 0.5 - 14.0, 3.0, 14.0), mid)
+			Palette.glow(self, Vector2(bx, r.position.y - bw * 0.5 - 16.0), 8.0, Palette.ORANGE, fade)
+			draw_circle(Vector2(bx, r.position.y - bw * 0.5 - 16.0), 2.5, Color(Palette.ORANGE, fade))
+		var wy := r.position.y + 10.0
+		var row := 0
+		while wy < gy - 8.0:
+			var wx := r.position.x + 5.0
+			while wx < r.end.x - 9.0:
+				if (int(wx) + row * 3) % 3 != 0:  # not every window is lit
+					draw_rect(Rect2(wx, wy, 5, 4), Color(Palette.AMBER, 0.8 * fade))
+				wx += 10.0
+			wy += 12.0
+			row += 1
+
+	# Near ground: dark band along the curve.
+	var near := PackedVector2Array()
+	x = -12.0
+	while x <= size.x + 12.0:
+		near.append(Vector2(x, ground.call(x) - 6.0 - 4.0 * sin(x * 0.03)))
+		x += 12.0
+	near.append(Vector2(size.x + 12.0, ground.call(size.x + 12.0) + 6.0))
+	near.append(Vector2(-12.0, ground.call(-12.0) + 6.0))
+	draw_colored_polygon(near, Color(Palette.INK, fade))
 
 
 ## Wobbly round shape (continents, clouds on Earth). Same seed = same shape every frame.
@@ -3150,9 +3161,9 @@ func _draw_clouds(size: Vector2, space: float) -> void:
 		var sc: float = cloud["scale"]
 		var a: float = fade * float(cloud["alpha"])
 		for p in cloud["puffs"]:  # soft grey underside first, then the white tops
-			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc + 6.0 * sc), p.z * sc, Color(0.78, 0.82, 0.9, a * 0.8))
+			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc + 6.0 * sc), p.z * sc, Color(Color("3e5f74"), a * 0.85))
 		for p in cloud["puffs"]:
-			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc), p.z * sc * 0.92, Color(1, 1, 1, a))
+			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc), p.z * sc * 0.92, Color(Color("6f9fa8"), a))
 
 
 ## Soft round glow (nebulae, planet halos) and sphere shading, made once at startup.

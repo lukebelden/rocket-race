@@ -42,11 +42,12 @@ var _time: float = 0.0
 
 const ModInfo := preload("res://mods.gd")
 const Animals := preload("res://animals.gd")
+const Palette := preload("res://palette.gd")
 
 ## Paint job (shop "designs") and the animal pilot in the window. Set by game.gd from Profile.
-var paint_main := Color(0.86, 0.2, 0.2)
-var paint_dark := Color(0.6, 0.1, 0.12)
-var paint_body := Color(0.95, 0.96, 0.98)
+var paint_main := Color("e5683b")
+var paint_dark := Color("a8432a")
+var paint_body := Color("e6efe9")
 var pilot: String = ""
 
 ## Screen x position of the finger steering the rocket, or NAN when not touching.
@@ -167,7 +168,7 @@ func _draw() -> void:
 	var red := paint_main
 	var dark_red := paint_dark
 	var white := paint_body
-	var shade := paint_body.darkened(0.18)
+	var shade := paint_body.lerp(Palette.HAZE, 0.35)
 
 	var thruster := mods.has("thruster")
 
@@ -177,27 +178,26 @@ func _draw() -> void:
 		var f := flame_power * _flicker * (1.5 if boosting else 1.0) * (1.3 if thruster else 1.0)
 		var w := 1.4 if thruster else 1.0
 		var y0 := 27.0 if thruster else 22.0
-		draw_colored_polygon(PackedVector2Array([Vector2(-9 * w, y0), Vector2(9 * w, y0), Vector2(4 * w, y0 + 16 * f), Vector2(0, y0 + 2 + 30 * f), Vector2(-4 * w, y0 + 16 * f)]), Color(1.0, 0.45, 0.1, 0.9))
-		draw_colored_polygon(PackedVector2Array([Vector2(-6 * w, y0), Vector2(6 * w, y0), Vector2(0, y0 + 1 + 20 * f)]), Color(1.0, 0.82, 0.25))
-		draw_colored_polygon(PackedVector2Array([Vector2(-3 * w, y0), Vector2(3 * w, y0), Vector2(0, y0 + 1 + 9 * f)]), Color(1, 1, 0.9))
+		draw_colored_polygon(PackedVector2Array([Vector2(-9 * w, y0), Vector2(9 * w, y0), Vector2(4 * w, y0 + 16 * f), Vector2(0, y0 + 2 + 30 * f), Vector2(-4 * w, y0 + 16 * f)]), Color(Palette.ORANGE, 0.95))
+		draw_colored_polygon(PackedVector2Array([Vector2(-6 * w, y0), Vector2(6 * w, y0), Vector2(0, y0 + 1 + 20 * f)]), Palette.AMBER)
+		draw_colored_polygon(PackedVector2Array([Vector2(-3 * w, y0), Vector2(3 * w, y0), Vector2(0, y0 + 1 + 9 * f)]), Color("fff4dc"))
 
 	# Booster pod flames (blue-white, hotter looking).
 	if has_booster and boosting:
 		for s in [-1.0, 1.0]:
 			var x: float = 17.0 * s
 			var bf := _flicker * 1.2
-			draw_colored_polygon(PackedVector2Array([Vector2(x - 4, 22), Vector2(x + 4, 22), Vector2(x, 24 + 26 * bf)]), Color(0.45, 0.75, 1.0, 0.85))
-			draw_colored_polygon(PackedVector2Array([Vector2(x - 2, 22), Vector2(x + 2, 22), Vector2(x, 23 + 14 * bf)]), Color(0.9, 0.97, 1.0))
+			draw_colored_polygon(PackedVector2Array([Vector2(x - 4, 22), Vector2(x + 4, 22), Vector2(x, 24 + 26 * bf)]), Color(Palette.AQUA, 0.9))
+			draw_colored_polygon(PackedVector2Array([Vector2(x - 2, 22), Vector2(x + 2, 22), Vector2(x, 23 + 14 * bf)]), Palette.MIST)
 
 	# Nozzle (Bigger Thruster: a wider engine bell with a glowing orange rim).
 	if thruster:
 		var tc: Color = ModInfo.MODS["thruster"]["color"]
-		draw_colored_polygon(PackedVector2Array([Vector2(-8, 16), Vector2(8, 16), Vector2(13, 27), Vector2(-13, 27)]), Color(0.26, 0.27, 0.31))
-		draw_line(Vector2(-11, 22), Vector2(11, 22), Color(0.45, 0.47, 0.52), 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-8, 16), Vector2(8, 16), Vector2(13, 27), Vector2(-13, 27)]), Palette.INDIGO)
 		draw_line(Vector2(-13, 27), Vector2(13, 27), tc, 2.5)
 	else:
-		draw_colored_polygon(PackedVector2Array([Vector2(-7, 17), Vector2(7, 17), Vector2(9, 24), Vector2(-9, 24)]), Color(0.3, 0.32, 0.36))
-		draw_line(Vector2(-8, 21), Vector2(8, 21), Color(0.45, 0.47, 0.52), 1.5)
+		draw_colored_polygon(PackedVector2Array([Vector2(-7, 17), Vector2(7, 17), Vector2(9, 24), Vector2(-9, 24)]), Palette.INDIGO)
+		draw_rect(Rect2(2, 17, 7, 7), Palette.INK)
 
 	# Side fins (with a darker lower edge).
 	for side in [-1.0, 1.0]:
@@ -212,7 +212,7 @@ func _draw() -> void:
 		for i in 2:
 			var s := -1.0 if i == 0 else 1.0
 			var x := 27.0 * s
-			draw_rect(Rect2(x - 1.5, 4, 3, 22), Color(0.3, 0.32, 0.36))
+			draw_rect(Rect2(x - 1.5, 4, 3, 22), Palette.INDIGO)
 			if missile_count > 1 - i:
 				draw_rect(Rect2(x - 2.2, 2, 4.4, 15), Color(0.93, 0.94, 0.97))
 				draw_colored_polygon(PackedVector2Array([Vector2(x - 2.2, 2), Vector2(x + 2.2, 2), Vector2(x, -4)]), mc)
@@ -259,21 +259,20 @@ func _draw() -> void:
 			var length := 6.0 + 6.0 * _flicker * clampf(absf(velocity_x) / max_speed, 0.3, 1.0)
 			draw_colored_polygon(PackedVector2Array([Vector2(12 * s, -16.5), Vector2((12 + length) * s, -14.5), Vector2(12 * s, -12.5)]), Color(cc.lightened(0.4), 0.85))
 
-	# Panel line and red band.
-	draw_line(Vector2(-10, 2), Vector2(10, 2), Color(0.6, 0.63, 0.7), 1.0)
+	# Paint band.
 	draw_rect(Rect2(-10, 10, 20, 4), red)
 
 	# Porthole window with a rim and glint (and your animal pilot looking out).
 	if pilot != "":
-		draw_circle(Vector2(0, -8), 8.5, Color(0.55, 0.58, 0.65))
-		draw_circle(Vector2(0, -8), 7.2, Color(0.55, 0.78, 1.0))
+		draw_circle(Vector2(0, -8), 8.5, Palette.INDIGO)
+		draw_circle(Vector2(0, -8), 7.2, Palette.AQUA)
 		Animals.draw_face(self, Vector2(0, -7.5), 5.4, pilot)
 		draw_arc(Vector2(0, -8), 6.4, PI * 1.1, PI * 1.45, 6, Color(1, 1, 1, 0.75), 1.2)
 	else:
-		draw_circle(Vector2(0, -7), 6.5, Color(0.55, 0.58, 0.65))
-		draw_circle(Vector2(0, -7), 5.0, Color(0.2, 0.55, 0.95))
-		draw_circle(Vector2(1.5, -5.5), 2.5, Color(0.12, 0.35, 0.75))
-		draw_circle(Vector2(-1.8, -8.8), 1.6, Color(1, 1, 1, 0.9))
+		draw_circle(Vector2(0, -7), 6.5, Palette.INDIGO)
+		draw_circle(Vector2(0, -7), 4.8, Palette.AQUA)
+		draw_circle(Vector2(1.4, -5.6), 2.6, Palette.TEAL)
+		draw_circle(Vector2(-1.6, -8.6), 1.3, Palette.MIST)
 
 	# Healing Panel: a pulsing green repair cross on the hull.
 	if mods.has("healing"):
@@ -296,14 +295,13 @@ func _draw_pod(at: Vector2) -> void:
 
 
 static func draw_pod(canvas: CanvasItem, at: Vector2) -> void:
-	var body := Color(0.88, 0.62, 0.2)
-	var dark := Color(0.62, 0.4, 0.12)
-	canvas.draw_colored_polygon(PackedVector2Array([at + Vector2(-4, -14), at + Vector2(0, -20), at + Vector2(4, -14)]), Color(0.9, 0.9, 0.92))
+	var body := Color("4a5578")
+	var dark := Color("36405f")
+	canvas.draw_colored_polygon(PackedVector2Array([at + Vector2(-4, -14), at + Vector2(0, -20), at + Vector2(4, -14)]), Color("ffc56b"))
 	canvas.draw_rect(Rect2(at + Vector2(-4, -14), Vector2(8, 28)), body)
 	canvas.draw_rect(Rect2(at + Vector2(1, -14), Vector2(3, 28)), dark)
-	canvas.draw_rect(Rect2(at + Vector2(-4, -6), Vector2(8, 3)), Color(0.25, 0.25, 0.28))
-	canvas.draw_rect(Rect2(at + Vector2(-4, 6), Vector2(8, 3)), Color(0.25, 0.25, 0.28))
-	canvas.draw_colored_polygon(PackedVector2Array([at + Vector2(-3, 14), at + Vector2(3, 14), at + Vector2(4, 17), at + Vector2(-4, 17)]), Color(0.3, 0.32, 0.36))
+	canvas.draw_rect(Rect2(at + Vector2(-4, 4), Vector2(8, 3)), Color("f0893c"))
+	canvas.draw_colored_polygon(PackedVector2Array([at + Vector2(-3, 14), at + Vector2(3, 14), at + Vector2(4, 17), at + Vector2(-4, 17)]), Color("12152a"))
 
 
 ## Little sparks streaming out of the engine (left behind in space as the rocket moves).

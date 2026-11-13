@@ -131,16 +131,9 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	if _outline.is_empty():
 		return  # sprite asteroid
-	draw_colored_polygon(_shadow, _color.darkened(0.35))
+	# Flat two-tone rock (minimal vector style): darker full silhouette, lit face on top,
+	# and a few flat crater dots. No highlights or outlines.
+	draw_colored_polygon(_shadow, _color.darkened(0.32))
 	draw_colored_polygon(_body, _color)
-	draw_colored_polygon(_highlight, _color.lightened(0.14))
-
 	for c in _craters:
-		var pos := Vector2(c.x, c.y)
-		draw_circle(pos, c.z, _color.darkened(0.25))
-		draw_circle(pos + Vector2(c.z * 0.2, c.z * 0.2), c.z * 0.7, _color.darkened(0.12))
-
-	var closed := _outline.duplicate()
-	closed.append(_outline[0])
-	# Not antialiased: antialiased lines vanish when baked into the transparent atlas.
-	draw_polyline(closed, _color.darkened(0.5), 2.0)
+		draw_circle(Vector2(c.x, c.y), c.z, _color.darkened(0.2))

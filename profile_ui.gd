@@ -167,10 +167,11 @@ func _card(parent: Control, title: String, note: String, picked: bool, locked: b
 		art.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		v.add_child(art)
-	var t := _label(title, 15, GOLD if picked else (DIM if locked else SOFT), v)
+	# Selected cards are orange (theme), so their text goes dark for contrast.
+	var t := _label(title, 15, Color("12152a") if picked else (DIM if locked else SOFT), v)
 	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if note != "":
-		var n := _label(note, 12, GOOD if picked else DIM, v)
+		var n := _label(note, 12, Color("12152a") if picked else DIM, v)
 		n.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(v)
 	parent.add_child(b)

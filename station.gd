@@ -3,6 +3,7 @@ extends Area2D
 ## It never hurts the rocket; once used it powers down (greys out).
 
 const Obstacle := preload("res://obstacle.gd")
+const Palette := preload("res://palette.gd")
 
 var fall_speed: float = 110.0
 var used: bool = false
@@ -28,10 +29,11 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var metal := Color(0.78, 0.8, 0.86) if not used else Color(0.45, 0.46, 0.5)
-	var dark := metal.darkened(0.35)
-	var panel := Color(0.2, 0.35, 0.75) if not used else Color(0.22, 0.24, 0.3)
-	var glow := Color(0.35, 1.0, 0.55) if not used else Color(0.4, 0.4, 0.45)
+	# Flat palette station: pale metal, teal solar panels, aqua "fuel here" light.
+	var metal := Color("c9d6dc") if not used else Palette.SLATE
+	var dark := metal.darkened(0.3)
+	var panel := Palette.TEAL if not used else Palette.INDIGO
+	var glow := Palette.AQUA if not used else Palette.TEXT_DIM
 
 	# Pulsing "fly here" ring.
 	if not used:
@@ -45,7 +47,6 @@ func _draw() -> void:
 		for i in 3:
 			var x := s * (42.0 + i * 24.0) - (22.0 if s < 0 else 0.0)
 			draw_rect(Rect2(x, -18, 22, 36), panel)
-			draw_rect(Rect2(x, -18, 22, 36), panel.lightened(0.3), false, 1.5)
 			draw_line(Vector2(x + 11, -18), Vector2(x + 11, 18), panel.lightened(0.2), 1.0)
 
 	# Rotating outer ring with spokes.
@@ -62,8 +63,8 @@ func _draw() -> void:
 
 	# Blinking navigation lights.
 	var blink := fmod(_time, 1.0) < 0.5
-	draw_circle(Vector2(-112, 0), 4.0, Color(1, 0.25, 0.25) if blink else Color(0.4, 0.1, 0.1))
-	draw_circle(Vector2(112, 0), 4.0, Color(0.3, 1, 0.4) if not blink else Color(0.1, 0.4, 0.15))
+	draw_circle(Vector2(-112, 0), 4.0, Palette.ORANGE if blink else Palette.RUST.darkened(0.5))
+	draw_circle(Vector2(112, 0), 4.0, Palette.AQUA if not blink else Palette.TEAL_DEEP)
 
 	# Label.
 	var font := ThemeDB.fallback_font

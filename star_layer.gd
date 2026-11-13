@@ -31,9 +31,10 @@ func build(screen: Vector2) -> void:
 		var pos := Vector2(randf() * screen.x, randf() * screen.y)
 		if kind == Kind.STARS:
 			var b := randf_range(brightness.x, brightness.y)
-			_items.append([pos, randf_range(size_range.x, size_range.y), Color(b, b, minf(b + 0.08, 1.0))])
+			_items.append([pos, randf_range(size_range.x, size_range.y), Color("a8e2d4").lerp(Color.WHITE, 0.4) * Color(b, b, b)])
 		else:
-			var colors := [Color(0.55, 0.3, 0.9), Color(0.2, 0.6, 0.8), Color(0.85, 0.3, 0.55), Color(0.3, 0.4, 0.95)]
+			# Hazy teal/indigo clouds (palette.gd), not bright colours.
+			var colors := [Color("2c6d6f"), Color("36405f"), Color("4fb8a8"), Color("262d52")]
 			_items.append([pos, randf_range(160.0, 320.0), colors[i % colors.size()]])
 	position.y = fmod(position.y, _height)
 	queue_redraw()
@@ -58,4 +59,4 @@ func _draw() -> void:
 				draw_texture_rect(glow_tex, Rect2(pos - Vector2(r, r), Vector2(r, r) * 2.0), false, item[2])
 			else:
 				var r: float = item[1]
-				draw_texture_rect(glow_tex, Rect2(pos - Vector2(r, r), Vector2(r, r) * 2.0), false, Color(item[2], 0.12))
+				draw_texture_rect(glow_tex, Rect2(pos - Vector2(r, r), Vector2(r, r) * 2.0), false, Color(item[2], 0.2))

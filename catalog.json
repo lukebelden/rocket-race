@@ -40,12 +40,12 @@
     { "id": "missile", "level": 16, "price": 2000 }
   ],
   "designs": [
-    { "id": "classic", "name": "Classic Red", "level": 1, "price": 0, "main": "#db3333", "dark": "#991a1f", "body": "#f2f5fa" },
-    { "id": "ocean", "name": "Ocean Blue", "level": 2, "price": 200, "main": "#2f7fe0", "dark": "#1b4f99", "body": "#f2f5fa" },
-    { "id": "lime", "name": "Lime Zest", "level": 3, "price": 300, "main": "#6cc93a", "dark": "#3f7d1f", "body": "#f4f8ef" },
-    { "id": "sunset", "name": "Sunset", "level": 5, "price": 500, "main": "#ff8a2a", "dark": "#b8501a", "body": "#fff4e6" },
-    { "id": "violet", "name": "Violet", "level": 7, "price": 700, "main": "#9a5ae0", "dark": "#5e2f99", "body": "#f5f0fb" },
-    { "id": "midnight", "name": "Midnight", "level": 10, "price": 1000, "main": "#3a4a6b", "dark": "#1e2638", "body": "#c9d2e3" },
-    { "id": "gold", "name": "Gold Rush", "level": 20, "price": 2500, "main": "#e8b923", "dark": "#9a7410", "body": "#2a2a30" }
+    { "id": "classic", "name": "Classic Red", "level": 1, "price": 0, "main": "#e5683b", "dark": "#a8432a", "body": "#e6efe9" },
+    { "id": "ocean", "name": "Ocean Blue", "level": 2, "price": 200, "main": "#3f8fd0", "dark": "#275d94", "body": "#e6efe9" },
+    { "id": "lime", "name": "Lime Zest", "level": 3, "price": 300, "main": "#7cc46a", "dark": "#4a8240", "body": "#e9f0e2" },
+    { "id": "sunset", "name": "Sunset", "level": 5, "price": 500, "main": "#f0893c", "dark": "#b9502c", "body": "#f6ead7" },
+    { "id": "violet", "name": "Violet", "level": 7, "price": 700, "main": "#9a73d6", "dark": "#62479a", "body": "#ece6f5" },
+    { "id": "midnight", "name": "Midnight", "level": 10, "price": 1000, "main": "#4a5578", "dark": "#262d52", "body": "#a8b6c9" },
+    { "id": "gold", "name": "Gold Rush", "level": 20, "price": 2500, "main": "#ffc56b", "dark": "#c88a2e", "body": "#262d52" }
   ]
 }
