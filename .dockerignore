@@ -1,0 +1,7 @@
+.git
+.godot
+server/node_modules
+*.gd
+*.uid
+*.tscn
+*.import

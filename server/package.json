@@ -1,0 +1,17 @@
+{
+  "name": "rocket-race-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rocket Race: serves the web build and runs multiplayer race rooms over WebSockets.",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

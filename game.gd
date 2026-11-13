@@ -9,6 +9,9 @@ const StarLayer := preload("res://star_layer.gd")
 const ScoreboardService := preload("res://scoreboard_service.gd")
 const ModInfo := preload("res://mods.gd")
 const ModIcon := preload("res://mod_icon.gd")
+const Rivals := preload("res://rivals.gd")
+## Multiplayer race: first pilot to fly through this many levels wins.
+const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
 const LOCAL_RUNS_KEPT := 8
 const SAVE_PATH := "user://save.cfg"
@@ -69,6 +72,38 @@ static var difficulty: Difficulty = Difficulty.NORMAL
 static var local_runs: Array = []
 ## Set by "Play Again" so the reloaded scene skips the menu.
 static var skip_menu: bool = false
+
+# --- Multiplayer (see net.gd / rivals.gd / server/index.js) ---
+## Set when the server starts a race: {seed, countdown}. The scene reloads and _ready() picks it up.
+static var race_pending: Dictionary = {}
+## Set by "Back to Lobby" so the reloaded scene opens the room screen.
+static var open_lobby: bool = false
+## Your pilot name for multiplayer (saved to disk).
+static var player_name: String = ""
+## Final standings of the last race in this room (shown in the lobby).
+static var last_results: Array = []
+var race_mode: bool = false
+## Gameplay randomness (asteroids, stations). In a race every player gets the same seed, so
+## everyone flies through exactly the same course.
+var course_rng := RandomNumberGenerator.new()
+var station_rng := RandomNumberGenerator.new()
+## Distance flown this run (1 unit = one second at normal speed). Races compare this.
+var distance: float = 0.0
+## Time.get_ticks_msec() when everyone launches together.
+var race_launch_at: int = 0
+var race_done: bool = false  # you've finished or crashed
+var my_finish_place: int = 0
+var race_results_shown: bool = false
+var rivals_node: Node2D
+var multiplayer_button: Button
+var mp_screen: Control
+var mp_box: VBoxContainer
+var mp_status: Label
+var _mp_name_edit: LineEdit
+var _mp_code_edit: LineEdit
+var _mp_buttons: Array[Button] = []
+var _send_timer: float = 0.0
+var _shown_place: int = -1
 
 var state: State = State.MENU
 var score: float = 0.0
@@ -194,6 +229,8 @@ var scoreboard_service: Node
 
 func _ready() -> void:
 	randomize()
+	course_rng.randomize()
+	station_rng.randomize()
 	Obstacle.world_speed = 1.0  # static: reset in case a previous run ended mid-boost
 	_make_textures()
 	_make_background()
@@ -244,9 +281,31 @@ func _ready() -> void:
 	play_again_button.pressed.connect(_on_play_again)
 	menu_button.pressed.connect(func() -> void: get_tree().reload_current_scene())
 
+	# Multiplayer
+	rivals_node = Rivals.new()
+	add_child(rivals_node)
+	move_child(rivals_node, rocket.get_index())  # ghosts fly behind your own rocket
+	_make_multiplayer_ui()
+	Net.room_updated.connect(_on_room_updated)
+	Net.error.connect(_on_net_error)
+	Net.connected.connect(_on_net_connected)
+	Net.disconnected.connect(_on_net_disconnected)
+	Net.race_started.connect(_on_race_started)
+	Net.rival_state.connect(func(id: int, data: Dictionary) -> void: rivals_node.update_rival(id, data))
+	Net.rival_done.connect(_on_rival_done)
+	Net.rival_left.connect(_on_rival_left)
+	Net.results.connect(_on_race_results)
+
 	level_banner.visible = false
 	launch_prompt.visible = false
-	if skip_menu:
+	if not race_pending.is_empty():
+		_begin_race(race_pending)
+		race_pending = {}
+	elif open_lobby:
+		open_lobby = false
+		_show_menu()
+		_open_multiplayer()
+	elif skip_menu:
 		skip_menu = false
 		_show_menu()
 		_go_to_pad()
@@ -272,12 +331,16 @@ func _process(delta: float) -> void:
 		State.READY:
 			ready_time += delta
 			launch_prompt.modulate.a = 0.55 + 0.45 * absf(sin(clock * 3.0))
+			if race_mode:
+				_update_race_countdown(delta)
 		State.INTRO:
 			_update_intro(delta)
 		State.PLAYING:
 			_update_playing(delta)
 
 	_update_tips(delta)
+	if race_mode:
+		_update_race(delta)
 
 	# Only redraw this node's own layer (Earth, clouds, smoke, debris) while something there
 	# is actually moving, plus one final frame to clear it.
@@ -295,7 +358,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_fire_missile()
 		return
 	# On the launch pad: Space (or a tap/click) launches when the player is ready.
-	if state != State.READY or ready_time < 0.25:
+	# (In a race everyone launches together when the countdown ends.)
+	if state != State.READY or ready_time < 0.25 or race_mode:
 		return
 	var key_launch: bool = event is InputEventKey and event.pressed and not event.echo \
 		and (event.physical_keycode == KEY_SPACE or event.physical_keycode == KEY_ENTER)
@@ -346,6 +410,8 @@ func _show_menu() -> void:
 	scoreboard.visible = false
 	game_over.visible = false
 	launch_prompt.visible = false
+	if mp_screen:
+		mp_screen.visible = false
 	menu.visible = true
 	start_button.grab_focus()
 	queue_redraw()
@@ -483,6 +549,8 @@ func _start_playing() -> void:
 
 
 func _on_play_again() -> void:
+	if race_mode:
+		return  # "Back to Lobby" (handled in _make_multiplayer_ui)
 	skip_menu = true
 	get_tree().reload_current_scene()
 
@@ -571,7 +639,11 @@ func _update_playing(delta: float) -> void:
 	missile_cooldown = maxf(missile_cooldown - delta, 0.0)
 
 	score += travelled * 10.0
+	distance += travelled
 	level_time += travelled
+	if level_time >= LEVEL_DURATION and race_mode and level >= RACE_LEVELS:
+		_race_finish()
+		return
 	if level_time >= LEVEL_DURATION:
 		level += 1
 		level_time = 0.0
@@ -586,14 +658,21 @@ func _update_playing(delta: float) -> void:
 	spawn_timer -= travelled
 	if spawn_timer <= 0.0:
 		_spawn_obstacle()
-		var tuning: Array = DIFFICULTY_TUNING[difficulty]
+		var tuning := _tuning()
 		# Each level is busier; it also ramps up a little within the level.
 		var interval := start_spawn_interval - (level - 1) * 0.1 - level_time * 0.004
 		spawn_timer = maxf(min_spawn_interval, interval) * tuning[0]
 
 
+## [spawn interval multiplier, fall speed multiplier]. Races always use Normal so it's fair.
+func _tuning() -> Array:
+	return DIFFICULTY_TUNING[Difficulty.NORMAL if race_mode else difficulty]
+
+
 func _show_level_banner() -> void:
 	level_banner.text = "LEVEL %d\n%s" % [level, String(_planet(level)["name"]).to_upper()]
+	if race_mode and level == RACE_LEVELS:
+		level_banner.text += "\nFINAL STRETCH!"
 	level_banner.visible = true
 	level_banner.modulate.a = 0.0
 	var tween := create_tween()
@@ -605,12 +684,19 @@ func _show_level_banner() -> void:
 func _update_hud() -> void:
 	# Only touch the labels when the number actually changes (re-setting text every frame
 	# makes Godot re-layout the label every frame).
-	if int(score) != _shown_score:
+	var place: int = rivals_node.my_place(false) if race_mode else 0
+	if int(score) != _shown_score or place != _shown_place:
 		_shown_score = int(score)
+		_shown_place = place
 		score_label.text = "Score: %d" % _shown_score
+		if race_mode:
+			score_label.text += "   ·   %s of %d" % [_ordinal(place), rivals_node.rivals.size() + 1]
 	if level != _shown_level:
 		_shown_level = level
-		level_label.text = "Level %d · %s" % [level, _planet(level)["name"]]
+		if race_mode:
+			level_label.text = "Level %d/%d · %s" % [level, RACE_LEVELS, _planet(level)["name"]]
+		else:
+			level_label.text = "Level %d · %s" % [level, _planet(level)["name"]]
 
 
 # --- Ship computer tips --------------------------------------------------------
@@ -915,7 +1001,7 @@ func _spawn_station() -> void:
 	var station := Station.new()
 	var size := get_viewport_rect().size
 	station.fall_speed = STATION_SPEED
-	station.position = Vector2(randf_range(140.0, size.x - 140.0), -90.0)
+	station.position = Vector2(lerpf(140.0, size.x - 140.0, station_rng.randf()), -90.0)
 	obstacles.add_child(station)
 	obstacles.move_child(station, 0)  # behind the asteroids
 	station_node = station
@@ -1379,10 +1465,14 @@ func _load_save() -> void:
 	var runs = cfg.get_value("score", "runs", [])
 	if runs is Array:
 		local_runs = runs.filter(func(r) -> bool: return r is Dictionary and r.has("score"))
+	var saved_name = cfg.get_value("multiplayer", "name", "")
+	if saved_name is String:
+		player_name = saved_name
 
 
 func _save() -> void:
 	var cfg := ConfigFile.new()
+	cfg.set_value("multiplayer", "name", player_name)
 	cfg.set_value("score", "best", best_score)
 	cfg.set_value("settings", "difficulty", difficulty)
 	cfg.set_value("score", "runs", local_runs)
@@ -1393,18 +1483,21 @@ func _save() -> void:
 
 func _spawn_obstacle() -> void:
 	var size := get_viewport_rect().size
-	var radius := randf_range(18.0, 46.0)
-	var tuning: Array = DIFFICULTY_TUNING[difficulty]
+	# All course randomness comes from course_rng (same seed for every racer). Positions are
+	# picked as a fraction of the screen width, so the course matches on phones and PCs.
+	var radius := course_rng.randf_range(18.0, 46.0)
+	var tuning := _tuning()
 
 	var rock := Obstacle.new()
-	var speed := start_fall_speed + (level - 1) * 40.0 + level_time * 2.0 + randf_range(0.0, 140.0)
+	var speed := start_fall_speed + (level - 1) * 40.0 + level_time * 2.0 + course_rng.randf_range(0.0, 140.0)
 	rock.fall_speed = speed * tuning[1]
-	rock.spin = randf_range(-2.0, 2.0)
+	rock.spin = course_rng.randf_range(-2.0, 2.0)
 	# Spawned a little above the window so the Radar mod can see them coming. (Without
 	# radar this just means they arrive a moment later - nothing else changes.)
-	rock.position = Vector2(randf_range(radius, size.x - radius), -radius - ModInfo.RADAR_RANGE)
+	rock.position = Vector2(lerpf(radius, size.x - radius, course_rng.randf()), -radius - ModInfo.RADAR_RANGE)
 	# Asteroids take on the colour of the planet you're passing.
 	rock.setup(radius, _planet(level)["rock"])
+	rock._phase = course_rng.randf() * TAU  # sway timing is part of the course too
 	_make_tricky(rock)
 	obstacles.add_child(rock)
 
@@ -1416,19 +1509,19 @@ func _make_tricky(rock) -> void:
 		return
 	var steps := level - 2  # 0 on Level 2, 1 on Level 3, ...
 	var chance := minf(0.25 + 0.1 * steps, 0.75)
-	if randf() > chance:
+	if course_rng.randf() > chance:
 		return
 
 	rock.tricky = true
-	var roll := randf()
+	var roll := course_rng.randf()
 	var sway := roll >= 0.35 or level < 3  # Level 2 only sways; diagonal drifters join from Level 3
 	var diagonal := (level >= 3 and roll < 0.35) or (level >= 4 and roll > 0.75)
 	if sway:
-		rock.sway_amount = minf(randf_range(30.0, 60.0) + 14.0 * steps, 170.0)
-		rock.sway_speed = minf(randf_range(1.4, 2.2) + 0.25 * steps, 4.5)
+		rock.sway_amount = minf(course_rng.randf_range(30.0, 60.0) + 14.0 * steps, 170.0)
+		rock.sway_speed = minf(course_rng.randf_range(1.4, 2.2) + 0.25 * steps, 4.5)
 	if diagonal:
-		var drift_speed := minf(randf_range(60.0, 110.0) + 22.0 * (level - 3), 260.0)
-		rock.drift = drift_speed * (1.0 if randf() < 0.5 else -1.0)
+		var drift_speed := minf(course_rng.randf_range(60.0, 110.0) + 22.0 * (level - 3), 260.0)
+		rock.drift = drift_speed * (1.0 if course_rng.randf() < 0.5 else -1.0)
 
 
 ## Background layers (far to near): faint nebulae, then three star layers. Nearer stars are
@@ -1620,6 +1713,12 @@ func _hull_breach() -> void:
 	rocket.modulate = Color(1.0, 0.4, 0.3)
 	rocket.flame_on = false
 
+	if race_mode:
+		race_done = true
+		Net.send({"t": "crashed", "d": distance, "score": int(score)})
+		_show_race_over("HULL BREACH!")
+		return
+
 	var new_best := score > best_score
 	if new_best:
 		best_score = score
@@ -1637,6 +1736,410 @@ func _hull_breach() -> void:
 	play_again_button.disabled = false
 	menu_button.disabled = false
 	play_again_button.grab_focus()
+
+
+# --- Multiplayer race ------------------------------------------------------------
+# Flow: Menu -> Multiplayer (name, create/join a room) -> Lobby (host presses Start Race)
+# -> the server sends a seed -> the scene reloads into race mode -> countdown on the pad ->
+# everyone launches together -> first through Level RACE_LEVELS wins -> results -> Lobby.
+
+## Called from _ready() after the scene reloads for a race.
+func _begin_race(info: Dictionary) -> void:
+	race_mode = true
+	var course_seed := int(info.get("seed", 1))
+	course_rng.seed = course_seed
+	station_rng.seed = course_seed * 7919 + 17
+	for p in Net.room.get("players", []):
+		var id := int(p.get("id", 0))
+		if id != Net.my_id:
+			rivals_node.add_rival(id, str(p.get("name", "Pilot")), Color.html(str(p.get("color", "#ffffff"))))
+	_show_menu()
+	_go_to_pad()
+	race_launch_at = int(info.get("launch_at", Time.get_ticks_msec() + 3000))
+	_update_race_countdown(0.0)
+
+
+func _update_race_countdown(_delta: float) -> void:
+	var race_countdown := (race_launch_at - Time.get_ticks_msec()) / 1000.0
+	if race_countdown <= 0.0:
+		_launch()
+		return
+	launch_prompt.text = "RACE STARTS IN\n%d" % ceili(race_countdown)
+
+
+## Every frame during a race: keep the ghosts lined up with you and report your flight.
+func _update_race(delta: float) -> void:
+	var size := get_viewport_rect().size
+	rivals_node.my_distance = distance
+	rivals_node.rocket_y = rocket.position.y
+	rivals_node.rocket_x = rocket.position.x
+	rivals_node.top_limit = 58.0
+	rivals_node.bottom_limit = size.y - cockpit.dash_height - 6.0
+	if race_done or not (state == State.INTRO or state == State.PLAYING or state == State.DOCKED):
+		return
+	_send_timer -= delta
+	if _send_timer <= 0.0:
+		_send_timer = Net.SEND_INTERVAL
+		Net.send({"t": "state", "x": rocket.position.x / size.x, "d": distance, "h": hull,
+			"b": rocket.boosting, "k": state == State.DOCKED})
+
+
+## Crossed the finish line (end of the last race level).
+func _race_finish() -> void:
+	state = State.OVER
+	race_done = true
+	forward_speed = 1.0
+	Obstacle.world_speed = 1.0
+	boost_button.visible = false
+	missile_button.visible = false
+	rocket.boost_button_held = false
+	rocket.active = false
+	Net.send({"t": "finished", "d": distance, "score": int(score)})
+	_show_toast("FINISH LINE!", Color(0.45, 1, 0.6))
+	_show_race_over("FINISHED!")
+
+
+## Race over for you: show live standings until everyone's done, then the final results.
+func _show_race_over(title: String) -> void:
+	game_over_title.text = title
+	score_label.text = "Score: %d" % int(score)  # drop the live race position
+	play_again_button.text = "Back to Lobby"
+	menu_button.text = "Leave Room"
+	play_again_button.disabled = true  # until the race results come in
+	menu_button.disabled = false
+	_refresh_race_over()
+	game_over.visible = true
+	menu_button.grab_focus()
+
+
+func _refresh_race_over() -> void:
+	if not race_mode or state != State.OVER or race_results_shown:
+		return
+	var lines: Array[String] = []
+	if my_finish_place > 0:
+		lines.append("You finished %s!" % _ordinal(my_finish_place))
+	elif hull <= 0.0:
+		lines.append("Your ship is out. Reached Level %d · %s" % [level, _planet(level)["name"]])
+	lines.append("")
+	for r in rivals_node.rivals.values():
+		var status := "flying · Level %d" % _level_at(float(r["d"]))
+		if r["status"] == "finished":
+			status = "FINISHED"
+		elif r["status"] == "crashed":
+			status = "out at Level %d" % _level_at(float(r["d"]))
+		lines.append("%s: %s" % [r["name"], status])
+	lines.append("")
+	lines.append("Waiting for the other pilots…" if Net.is_online() else "Lost connection to the race server.")
+	result_label.text = "\n".join(lines)
+	if not Net.is_online():
+		menu_button.text = "Main Menu"
+
+
+func _show_results(ranking: Array) -> void:
+	var lines: Array[String] = ["RACE RESULTS", ""]
+	for row in ranking:
+		if not row is Dictionary:
+			continue
+		var line := "%d. %s" % [int(row.get("rank", 0)), str(row.get("name", "?"))]
+		if int(row.get("id", -1)) == Net.my_id:
+			line += " (you)"
+		if row.get("status") == "finished":
+			line += " · %s" % _format_time(int(row.get("timeMs", 0)))
+		else:
+			line += " · out at Level %d" % _level_at(float(row.get("d", 0.0)))
+		lines.append(line)
+	result_label.text = "\n".join(lines)
+	race_results_shown = true  # final: later room changes (someone leaving) don't overwrite it
+	play_again_button.disabled = false
+	play_again_button.grab_focus()
+
+
+func _level_at(dist: float) -> int:
+	return mini(int(dist / LEVEL_DURATION) + 1, RACE_LEVELS)
+
+
+func _format_time(ms: int) -> String:
+	return "%d:%04.1f" % [ms / 60000, (ms % 60000) / 1000.0]
+
+
+func _ordinal(n: int) -> String:
+	match n:
+		1: return "1st"
+		2: return "2nd"
+		3: return "3rd"
+	return "%dth" % n
+
+
+# Server messages ---------------------------------------------------------------------
+
+func _on_race_started(course_seed: int, countdown: float) -> void:
+	race_pending = {"seed": course_seed, "launch_at": Time.get_ticks_msec() + int(countdown * 1000.0)}
+	last_results = []
+	get_tree().reload_current_scene()
+
+
+func _on_rival_done(kind: String, data: Dictionary) -> void:
+	var id := int(data.get("id", 0))
+	if id == Net.my_id:
+		if kind == "finished":
+			my_finish_place = int(data.get("place", 0))
+	else:
+		rivals_node.set_status(id, kind, float(data.get("d", 0.0)))
+		if kind == "finished" and state == State.PLAYING:
+			_show_toast("%s FINISHED!" % str(data.get("name", Net.player(id).get("name", "A rival"))).to_upper(), Color(1, 0.85, 0.45))
+	_refresh_race_over()
+
+
+func _on_rival_left(id: int) -> void:
+	var r: Dictionary = rivals_node.rivals.get(id, {})
+	if not r.is_empty() and race_mode and state == State.PLAYING:
+		_show_toast("%s LEFT THE RACE" % str(r["name"]).to_upper(), Color(0.75, 0.78, 0.85))
+	rivals_node.remove_rival(id)
+	_refresh_race_over()
+
+
+func _on_race_results(ranking: Array) -> void:
+	last_results = ranking
+	if race_mode and state == State.OVER:
+		_show_results(ranking)
+
+
+func _on_net_connected() -> void:
+	_set_mp_status("Connected. Create a room or join one with a code.", Color(0.45, 1, 0.6))
+	_set_mp_buttons_enabled(true)
+
+
+func _on_net_disconnected() -> void:
+	if race_mode:
+		if state == State.OVER:
+			_refresh_race_over()
+			menu_button.disabled = false
+		else:
+			_show_toast("LOST CONNECTION TO RACE SERVER", Color(1, 0.5, 0.4))
+	elif mp_screen.visible:
+		_show_mp_join()
+		_set_mp_status("Lost connection to the race server.", Color(1, 0.6, 0.45))
+
+
+func _on_net_error(message: String) -> void:
+	if mp_screen.visible:
+		_set_mp_status(message, Color(1, 0.6, 0.45))
+		if not Net.is_online():
+			_set_mp_buttons_enabled(false)
+
+
+func _on_room_updated(room: Dictionary) -> void:
+	if not is_inside_tree() or not race_pending.is_empty() or not mp_screen.visible or race_mode:
+		return
+	if room.is_empty():
+		_show_mp_join()
+	else:
+		_show_mp_lobby()
+
+
+# Multiplayer screens ------------------------------------------------------------------
+
+func _make_multiplayer_ui() -> void:
+	start_button.text = "Single Player"
+	multiplayer_button = Button.new()
+	multiplayer_button.text = "Multiplayer"
+	multiplayer_button.custom_minimum_size = start_button.custom_minimum_size
+	multiplayer_button.add_theme_font_size_override("font_size", 24)
+	start_button.add_sibling(multiplayer_button)
+	multiplayer_button.pressed.connect(_open_multiplayer)
+
+	# Same look as the Settings screen: copy its frame, then fill it in code.
+	mp_screen = settings.duplicate(0)
+	mp_screen.name = "Multiplayer"
+	mp_screen.visible = false
+	settings.add_sibling(mp_screen)
+	mp_box = mp_screen.get_node("Panel/VBox")
+	for child in mp_box.get_children():
+		mp_box.remove_child(child)
+		child.free()
+
+	# Race over: "Back to Lobby" / "Leave Room" reuse the game over buttons.
+	play_again_button.pressed.connect(func() -> void:
+		if race_mode:
+			open_lobby = true
+			get_tree().reload_current_scene())
+	menu_button.pressed.connect(func() -> void:
+		if race_mode:
+			Net.leave_room())
+
+
+func _open_multiplayer() -> void:
+	menu.visible = false
+	mp_screen.visible = true
+	if Net.in_room():
+		_show_mp_lobby()
+		return
+	_show_mp_join()
+	if Net.is_online():
+		_on_net_connected()
+	else:
+		_set_mp_status("Connecting to the race server…", Color(0.9, 0.85, 0.5))
+		_set_mp_buttons_enabled(false)
+		Net.connect_to_server()
+
+
+func _close_multiplayer() -> void:
+	if Net.in_room():
+		Net.leave_room()
+	_show_menu()
+
+
+func _clear_mp() -> void:
+	_mp_buttons.clear()
+	for child in mp_box.get_children():
+		mp_box.remove_child(child)
+		child.queue_free()
+
+
+func _mp_label(text: String, size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size.x = 440
+	label.add_theme_font_size_override("font_size", size)
+	label.add_theme_color_override("font_color", color)
+	mp_box.add_child(label)
+	return label
+
+
+func _mp_button(text: String, on_press: Callable, parent: Control = null) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(300, 46)
+	button.add_theme_font_size_override("font_size", 22)
+	button.pressed.connect(on_press)
+	(parent if parent else mp_box).add_child(button)
+	return button
+
+
+func _set_mp_status(text: String, color: Color) -> void:
+	if mp_status and is_instance_valid(mp_status):
+		mp_status.text = text
+		mp_status.add_theme_color_override("font_color", color)
+
+
+func _set_mp_buttons_enabled(on: bool) -> void:
+	for b in _mp_buttons:
+		if is_instance_valid(b):
+			b.disabled = not on
+
+
+## Pick a name, then create a room or type a friend's code.
+func _show_mp_join() -> void:
+	_clear_mp()
+	_mp_label("MULTIPLAYER", 44, Color(1, 0.75, 0.35))
+	_mp_label("Race up to 3 friends through the same asteroid field.\nFirst through Level %d wins!" % RACE_LEVELS,
+		16, Color(0.8, 0.84, 0.92))
+
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 12)
+	var name_label := Label.new()
+	name_label.text = "Pilot name"
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_row.add_child(name_label)
+	_mp_name_edit = LineEdit.new()
+	_mp_name_edit.max_length = 12
+	_mp_name_edit.placeholder_text = "Pilot"
+	_mp_name_edit.text = player_name
+	_mp_name_edit.custom_minimum_size = Vector2(200, 46)
+	name_row.add_child(_mp_name_edit)
+	mp_box.add_child(name_row)
+
+	_mp_buttons.append(_mp_button("Create Room", _on_create_room))
+
+	var join_row := HBoxContainer.new()
+	join_row.add_theme_constant_override("separation", 12)
+	_mp_code_edit = LineEdit.new()
+	_mp_code_edit.max_length = 4
+	_mp_code_edit.placeholder_text = "ROOM CODE"
+	_mp_code_edit.custom_minimum_size = Vector2(170, 46)
+	_mp_code_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mp_code_edit.text_submitted.connect(func(_t: String) -> void: _on_join_room())
+	join_row.add_child(_mp_code_edit)
+	var join := _mp_button("Join", _on_join_room, join_row)
+	join.custom_minimum_size = Vector2(120, 46)
+	_mp_buttons.append(join)
+	mp_box.add_child(join_row)
+
+	mp_status = _mp_label("", 15, Color(0.8, 0.84, 0.92))
+	var back := _mp_button("Back", _close_multiplayer)
+	back.grab_focus()
+	_set_mp_buttons_enabled(Net.is_online())
+	if Net.is_online():
+		_set_mp_status("Connected. Create a room or join one with a code.", Color(0.45, 1, 0.6))
+
+
+func _remember_name() -> String:
+	var n := _mp_name_edit.text.strip_edges() if _mp_name_edit else player_name
+	if n == "":
+		n = "Pilot"
+	if n != player_name:
+		player_name = n
+		_save()
+	return n
+
+
+func _on_create_room() -> void:
+	_set_mp_status("Creating room…", Color(0.9, 0.85, 0.5))
+	Net.create_room(_remember_name())
+
+
+func _on_join_room() -> void:
+	var code := _mp_code_edit.text.strip_edges().to_upper()
+	if code.length() != 4:
+		_set_mp_status("Room codes are 4 letters.", Color(1, 0.6, 0.45))
+		return
+	_set_mp_status("Joining %s…" % code, Color(0.9, 0.85, 0.5))
+	Net.join_room(code, _remember_name())
+
+
+## The room: share the code, see who's in, host starts the race.
+func _show_mp_lobby() -> void:
+	var room := Net.room
+	_clear_mp()
+	_mp_label("ROOM  %s" % str(room.get("code", "????")), 44, Color(1, 0.75, 0.35))
+	_mp_label("Share this code with friends so they can join.", 16, Color(0.8, 0.84, 0.92))
+
+	var players: Array = room.get("players", [])
+	for p in players:
+		var id := int(p.get("id", 0))
+		var tags: Array[String] = []
+		if id == int(room.get("host", -1)):
+			tags.append("host")
+		if id == Net.my_id:
+			tags.append("you")
+		var text := str(p.get("name", "Pilot")) + ("  (%s)" % ", ".join(tags) if not tags.is_empty() else "")
+		_mp_label(text, 22, Color.html(str(p.get("color", "#ffffff"))))
+
+	if not last_results.is_empty():
+		var podium: Array[String] = []
+		for row in last_results:
+			if row is Dictionary:
+				podium.append("%d. %s" % [int(row.get("rank", 0)), str(row.get("name", "?"))])
+		_mp_label("Last race:  " + "   ".join(podium), 15, Color(1, 0.85, 0.45))
+
+	var min_players := int(room.get("min", 2))
+	var enough := players.size() >= min_players
+	mp_status = _mp_label("", 15, Color(0.8, 0.84, 0.92))
+	var first: Button = null
+	if Net.is_host():
+		var start := _mp_button("Start Race", Net.start_race)
+		start.disabled = not enough
+		first = start
+		if enough:
+			_set_mp_status("%d pilots ready. Start when everyone's in!" % players.size(), Color(0.45, 1, 0.6))
+		else:
+			_set_mp_status("Waiting for at least %d pilots…" % min_players, Color(0.9, 0.85, 0.5))
+	else:
+		_set_mp_status("Waiting for the host to start the race…", Color(0.9, 0.85, 0.5))
+	var leave := _mp_button("Leave Room", _close_multiplayer)
+	(first if first and not first.disabled else leave).grab_focus()
 
 
 # --- Drawing -----------------------------------------------------------------
