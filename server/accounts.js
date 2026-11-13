@@ -28,6 +28,13 @@ db.exec(`
   );
 `);
 
+for (const row of db.prepare("SELECT id, profile FROM users").all()) {
+  let data = {};
+  try { data = JSON.parse(row.profile); } catch {}
+  const clean = JSON.stringify(progress.sanitize(data));
+  if (clean !== row.profile) db.prepare("UPDATE users SET profile = ? WHERE id = ?").run(clean, row.id);
+}
+
 const SESSION_DAYS = 60;
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 
@@ -104,4 +111,27 @@ function save(user) {
   db.prepare("UPDATE users SET profile = ? WHERE id = ?").run(JSON.stringify(user.profile), user.id);
 }
 
-module.exports = { signup, login, logout, userForToken, save, view };
+/** Top pilots. sp: best single-player score. mp: win rate (at least MIN_RACES races), then best race score. */
+const MIN_RACES = 3;
+function leaderboard(mode, limit = 10) {
+  if (mode === "mp") {
+    return db
+      .prepare(`SELECT username AS name, json_extract(profile, '$.character') AS character,
+          json_extract(profile, '$.stats.mp_wins') AS wins, json_extract(profile, '$.stats.mp_races') AS races,
+          json_extract(profile, '$.stats.mp_best') AS best,
+          CAST(json_extract(profile, '$.stats.mp_wins') AS REAL) / json_extract(profile, '$.stats.mp_races') AS rate
+        FROM users WHERE json_extract(profile, '$.stats.mp_races') >= ?
+        ORDER BY rate DESC, best DESC LIMIT ?`)
+      .all(MIN_RACES, limit)
+      .map((r) => ({ ...r, rate: Math.round((r.rate || 0) * 100), level: 0 }));
+  }
+  return db
+    .prepare(`SELECT username AS name, json_extract(profile, '$.character') AS character,
+        json_extract(profile, '$.stats.sp_best') AS best, json_extract(profile, '$.sp.xp') AS xp
+      FROM users WHERE json_extract(profile, '$.stats.sp_best') > 0
+      ORDER BY best DESC LIMIT ?`)
+    .all(limit)
+    .map((r) => ({ name: r.name, character: r.character, best: r.best, level: progress.levelInfo(r.xp).level }));
+}
+
+module.exports = { signup, login, logout, userForToken, save, view, leaderboard, MIN_RACES };

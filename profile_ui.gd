@@ -1,6 +1,8 @@
 extends Node
-## Account, Hangar and Shop screens. game.gd creates this and calls setup() with the
-## Settings screen to copy its look; each screen fills one shared panel in code.
+## Account, Pilot pick, Hangar and Shop screens. game.gd creates this and calls setup() with
+## the Settings screen to copy its look; each screen fills one shared panel in code.
+## Hangar and Shop belong to one mode ("sp" or "mp"): each mode has its own credits,
+## unlocks (by that mode's level) and loadout.
 
 signal closed
 
@@ -19,6 +21,9 @@ var screen: Control
 var box: VBoxContainer
 var status: Label
 var _page: String = ""
+## Which mode's hangar/shop is open: "sp" or "mp".
+var _track: String = "sp"
+var _pick: String = ""
 var _shop_tab: String = "ships"
 var _user_edit: LineEdit
 var _pass_edit: LineEdit
@@ -42,8 +47,10 @@ func setup(template: Control) -> void:
 			_render())
 
 
-func open(page: String) -> void:
+func open(page: String, track := "sp") -> void:
 	_page = page
+	_track = track
+	_pick = Profile.character()
 	_scroll_box = null
 	screen.visible = true
 	_render()
@@ -65,6 +72,7 @@ func _render() -> void:
 		"account": _render_account()
 		"hangar": _render_hangar()
 		"shop": _render_shop()
+		"pick": _render_pick()
 
 
 # --- Little builders -------------------------------------------------------------------
@@ -194,13 +202,13 @@ func _rocket_preview(parent: Control) -> void:
 	r.flame_power = 0.8
 	r.monitoring = false
 	r.monitorable = false
-	var d := Profile.design()
+	var d := Profile.design(_track)
 	r.paint_main = Color.html(str(d.get("main", "#db3333")))
 	r.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	r.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
-	r.mods.assign(Profile.loadout()["mods"])
+	r.mods.assign(Profile.loadout(_track)["mods"])
 	r.missile_count = 5
-	r.scale = Vector2.ONE * 1.8 * float(Profile.ship().get("size", 1.0))
+	r.scale = Vector2.ONE * 1.8 * float(Profile.ship(_track).get("size", 1.0))
 	r.position = Vector2(75, 72)
 	holder.add_child(r)
 	r.set_process(false)  # just a picture: don't let it fly around
@@ -240,8 +248,10 @@ func _render_account() -> void:
 		_xp_bar(box, "Single Player", int(Profile.data["sp"]["xp"]))
 		_xp_bar(box, "Multiplayer", int(Profile.data["mp"]["xp"]))
 		var st: Dictionary = Profile.data["stats"]
-		_label("Credits: %d   ·   Runs: %d   ·   Races: %d   ·   Wins: %d" % [Profile.credits(),
-			int(st["sp_runs"]), int(st["mp_races"]), int(st["mp_wins"])], 16, SOFT)
+		_label("Single Player: %d cr · best %d · %d runs" % [Profile.credits("sp"), int(st["sp_best"]), int(st["sp_runs"])], 16, SOFT)
+		_label("Multiplayer: %d cr · %d wins / %d races · best %d" % [Profile.credits("mp"), int(st["mp_wins"]),
+			int(st["mp_races"]), int(st["mp_best"])], 16, SOFT)
+		_button("Change Pilot", func() -> void: open("pick"))
 		status = _label("", 15, SOFT)
 		_button("Log Out", func() -> void:
 			Profile.logout()
@@ -280,7 +290,7 @@ func _render_account() -> void:
 	else:
 		_button("Play as Guest", func() -> void:
 			Profile.start_guest()
-			close())
+			open("pick"))  # new guests choose their pilot first
 	_user_edit.grab_focus()
 
 
@@ -305,14 +315,17 @@ func _do_login(is_signup: bool) -> void:
 	if err != "":
 		_set_status(err, BAD)
 		return
-	close()
+	if Profile.needs_pilot_pick:
+		open("pick")  # new account: choose your pilot before flying
+	else:
+		close()
 
 
 # --- Hangar: pilot, ship, paint, fitted mods ---------------------------------------------
 
 func _render_hangar() -> void:
-	_label("HANGAR", 40, GOLD)
-	var lo := Profile.loadout()
+	_label("%s HANGAR" % ("SINGLE PLAYER" if _track == "sp" else "MULTIPLAYER"), 34, GOLD)
+	var lo := Profile.loadout(_track)
 	var inner := _scroll(470)
 	_rocket_preview(inner)
 
@@ -320,30 +333,30 @@ func _render_hangar() -> void:
 	var pilots := _flow(inner)
 	for c in Profile.items("characters"):
 		var id := str(c["id"])
-		_card(pilots, str(c["name"]), "", lo["character"] == id, false,
-			func() -> void: Profile.set_loadout({"character": id}), _avatar(id))
+		_card(pilots, str(c["name"]), "", Profile.character() == id, false,
+			func() -> void: Profile.set_character(id), _avatar(id))
 
 	_label("SHIP", 17, GOLD, inner)
 	var ships := _flow(inner)
 	for s in Profile.items("ships"):
 		var id := str(s["id"])
-		var owned := Profile.owns("ships", id)
+		var owned := Profile.owns(_track, "ships", id)
 		var note := "%d slot%s" % [s["slots"], "" if int(s["slots"]) == 1 else "s"] if owned else "Shop · Lvl %d" % int(s["level"])
 		_card(ships, str(s["name"]), note, lo["ship"] == id, not owned,
-			func() -> void: Profile.set_loadout({"ship": id}))
-	_label(str(Profile.ship().get("desc", "")), 14, SOFT, inner)
+			func() -> void: Profile.set_loadout(_track, {"ship": id}))
+	_label(str(Profile.ship(_track).get("desc", "")), 14, SOFT, inner)
 
 	_label("PAINT", 17, GOLD, inner)
 	var paints := _flow(inner)
 	for d in Profile.items("designs"):
 		var id := str(d["id"])
-		var owned := Profile.owns("designs", id)
+		var owned := Profile.owns(_track, "designs", id)
 		_card(paints, str(d["name"]), "" if owned else "Shop", lo["design"] == id, not owned,
-			func() -> void: Profile.set_loadout({"design": id}), _swatch(d))
+			func() -> void: Profile.set_loadout(_track, {"design": id}), _swatch(d))
 
-	var slots := int(Profile.ship().get("slots", 1))
+	var slots := int(Profile.ship(_track).get("slots", 1))
 	_label("STARTING MODS  (%d / %d slots)" % [(lo["mods"] as Array).size(), slots], 17, GOLD, inner)
-	var owned_mods: Array = Profile.data["owned"]["mods"]
+	var owned_mods: Array = Profile.track(_track)["owned"]["mods"]
 	if owned_mods.is_empty():
 		_label("Buy mods in the Shop to start every run with them fitted.\n(Stations still offer random mods during a run.)", 14, DIM, inner)
 	else:
@@ -357,25 +370,27 @@ func _render_hangar() -> void:
 
 
 func _toggle_mod(id: String) -> void:
-	var fitted: Array = (Profile.loadout()["mods"] as Array).duplicate()
+	var fitted: Array = (Profile.loadout(_track)["mods"] as Array).duplicate()
 	if fitted.has(id):
 		fitted.erase(id)
-	elif fitted.size() >= int(Profile.ship().get("slots", 1)):
+	elif fitted.size() >= int(Profile.ship(_track).get("slots", 1)):
 		_render()
 		_set_status("All slots are full. Remove a mod first, or get a bigger ship.", BAD)
 		return
 	else:
 		fitted.append(id)
-	Profile.set_loadout({"mods": fitted})
+	Profile.set_loadout(_track, {"mods": fitted})
 
 
 # --- Shop ----------------------------------------------------------------------------------
 
 func _render_shop() -> void:
-	_label("SHOP", 40, GOLD)
-	_label("Credits: %d   ·   Pilot level %d" % [Profile.credits(), Profile.pilot_level()], 18, Color(0.55, 0.85, 1))
-	if not Profile.shop_open():
-		_label("The shop opens at level %d.\nFly some runs to earn XP!" % int(Profile.catalog["shop_level"]), 17, SOFT)
+	var mode_name := "Single Player" if _track == "sp" else "Multiplayer"
+	_label("%s SHOP" % mode_name.to_upper(), 34, GOLD)
+	_label("Credits: %d   ·   %s level %d" % [Profile.credits(_track), mode_name, Profile.level(_track)], 18, Color(0.55, 0.85, 1))
+	if not Profile.shop_open(_track):
+		_label("This shop opens at %s level %d.\n%s" % [mode_name, int(Profile.catalog["shop_level"]),
+			"Fly some runs to earn XP!" if _track == "sp" else "Race to earn Multiplayer XP!"], 17, SOFT)
 		_button("Back", close).grab_focus()
 		return
 	var tabs := _row()
@@ -427,15 +442,15 @@ func _shop_row(parent: Control, it: Dictionary) -> void:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(150, 44)
 	b.add_theme_font_size_override("font_size", 17)
-	if Profile.owns(_shop_tab, id):
+	if Profile.owns(_track, _shop_tab, id):
 		b.text = "Owned"
 		b.disabled = true
-	elif Profile.pilot_level() < level:
+	elif Profile.level(_track) < level:
 		b.text = "Unlocks Lvl %d" % level
 		b.disabled = true
 	else:
 		b.text = "Buy  %d cr" % price
-		b.disabled = Profile.credits() < price
+		b.disabled = Profile.credits(_track) < price
 		b.pressed.connect(_buy.bind(_shop_tab, id, title))
 	row.add_child(b)
 
@@ -444,7 +459,7 @@ func _buy(kind: String, id: String, title: String) -> void:
 	if _busy:
 		return
 	_busy = true
-	var err: String = await Profile.buy(kind, id)
+	var err: String = await Profile.buy(_track, kind, id)
 	_busy = false
 	if not is_instance_valid(box) or not screen.visible:
 		return
@@ -453,3 +468,24 @@ func _buy(kind: String, id: String, title: String) -> void:
 		_set_status(err, BAD)
 	else:
 		_set_status("Bought %s! Fit it in the Hangar." % title, GOOD)
+
+
+# --- Choose your pilot (new players, or "Change Pilot") -------------------------------------
+
+func _render_pick() -> void:
+	_label("CHOOSE YOUR PILOT", 38, GOLD)
+	_label("Who's flying? You can change this any time in the Hangar.", 16, SOFT)
+	var flow := _flow(box)
+	flow.custom_minimum_size.x = 620
+	for c in Profile.items("characters"):
+		var id := str(c["id"])
+		var b := _card(flow, str(c["name"]), "", _pick == id, false, func() -> void:
+			_pick = id
+			_render(), _avatar(id))
+		b.custom_minimum_size = Vector2(140, 150)
+		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(96, 96)
+	var go := _button("Let's Fly as %s!" % Profile.character_name(_pick), func() -> void:
+		Profile.needs_pilot_pick = false
+		Profile.set_character(_pick)
+		close())
+	go.grab_focus()

@@ -1,6 +1,10 @@
 extends Node
 ## Player profile (autoload "Profile"): guest or account, levels, credits, unlocks, loadout.
 ##
+## Single player ("sp") and multiplayer ("mp") are separate tracks: each has its own XP and
+## level, credits, owned items and hangar loadout, and its shop unlocks follow that mode's
+## level. The animal pilot is shared.
+##
 ## Guests play single player only; their progress is saved on this device (user://profile.cfg).
 ## Accounts live on the server (server/accounts.js) - every change goes through the API, and
 ## signing up keeps your guest progress. Rules mirror server/progress.js; numbers come from
@@ -12,16 +16,18 @@ signal rewarded(reward: Dictionary)
 
 const SAVE_PATH := "user://profile.cfg"
 const DESKTOP_API := "http://localhost:8080"
+const TRACK_NAMES := {"sp": "Single Player", "mp": "Multiplayer"}
 
 var catalog: Dictionary = {}
 ## "" (not chosen yet), "guest" or "account"
 var mode: String = ""
 var token: String = ""
 var username: String = ""
-## {sp: {xp}, mp: {xp}, credits, owned: {ships, mods, designs}, loadout: {character, ship, design, mods}, stats}
+## {character, sp: track, mp: track, stats}; track = {xp, credits, owned: {ships, mods, designs},
+## loadout: {ship, design, mods}}
 var data: Dictionary = {}
-## Last reward, shown on the game over screen.
-var last_reward: Dictionary = {}
+## Set for brand-new players: the game shows the "choose your pilot" screen once.
+var needs_pilot_pick: bool = false
 
 
 func _ready() -> void:
@@ -36,13 +42,15 @@ func _ready() -> void:
 
 # --- Rules (same as server/progress.js) ------------------------------------------------
 
-func new_profile() -> Dictionary:
-	return {
-		"sp": {"xp": 0}, "mp": {"xp": 0}, "credits": 0,
+func new_track() -> Dictionary:
+	return {"xp": 0, "credits": 0,
 		"owned": {"ships": ["small"], "mods": [], "designs": ["classic"]},
-		"loadout": {"character": "duck", "ship": "small", "design": "classic", "mods": []},
-		"stats": {"sp_runs": 0, "sp_best": 0, "mp_races": 0, "mp_wins": 0},
-	}
+		"loadout": {"ship": "small", "design": "classic", "mods": []}}
+
+
+func new_profile() -> Dictionary:
+	return {"character": "duck", "sp": new_track(), "mp": new_track(),
+		"stats": {"sp_runs": 0, "sp_best": 0, "mp_races": 0, "mp_wins": 0, "mp_best": 0}}
 
 
 func xp_to_next(level: int) -> int:
@@ -63,25 +71,28 @@ func level_info(xp: int) -> Dictionary:
 	return {"level": level, "into": rem, "need": 0 if level >= max_level() else xp_to_next(level)}
 
 
+func track(t: String) -> Dictionary:
+	return data[t]
+
+
+func level(t: String) -> int:
+	return int(level_info(int(data[t]["xp"]))["level"])
+
+
 func sp_level() -> int:
-	return int(level_info(int(data["sp"]["xp"]))["level"])
+	return level("sp")
 
 
 func mp_level() -> int:
-	return int(level_info(int(data["mp"]["xp"]))["level"])
+	return level("mp")
 
 
-## The higher of the two levels decides what's unlocked.
-func pilot_level() -> int:
-	return maxi(sp_level(), mp_level())
+func credits(t: String) -> int:
+	return int(data[t].get("credits", 0))
 
 
-func credits() -> int:
-	return int(data.get("credits", 0))
-
-
-func shop_open() -> bool:
-	return pilot_level() >= int(catalog.get("shop_level", 2))
+func shop_open(t: String) -> bool:
+	return level(t) >= int(catalog.get("shop_level", 2))
 
 
 func items(kind: String) -> Array:
@@ -95,24 +106,24 @@ func item(kind: String, id: String) -> Dictionary:
 	return {}
 
 
-func owns(kind: String, id: String) -> bool:
-	return data["owned"][kind].has(id)
+func owns(t: String, kind: String, id: String) -> bool:
+	return data[t]["owned"][kind].has(id)
 
 
-func loadout() -> Dictionary:
-	return data["loadout"]
+func loadout(t: String) -> Dictionary:
+	return data[t]["loadout"]
 
 
-func ship() -> Dictionary:
-	return item("ships", str(loadout()["ship"]))
+func ship(t: String) -> Dictionary:
+	return item("ships", str(loadout(t)["ship"]))
 
 
-func design() -> Dictionary:
-	return item("designs", str(loadout()["design"]))
+func design(t: String) -> Dictionary:
+	return item("designs", str(loadout(t)["design"]))
 
 
 func character() -> String:
-	return str(loadout()["character"])
+	return str(data.get("character", "duck"))
 
 
 func character_name(id: String) -> String:
@@ -131,20 +142,21 @@ func display_name() -> String:
 	return username if is_account() else "Guest"
 
 
-func _grant(track: String, xp: int, credit: int) -> Dictionary:
-	var before := int(level_info(int(data[track]["xp"]))["level"])
-	data[track]["xp"] = int(data[track]["xp"]) + xp
-	var after := int(level_info(int(data[track]["xp"]))["level"])
+func _grant(t: String, xp: int, credit: int) -> Dictionary:
+	var tr: Dictionary = data[t]
+	var before := level(t)
+	tr["xp"] = int(tr["xp"]) + xp
+	var after := level(t)
 	var bonus := 0
 	for lv in range(before + 1, after + 1):
 		bonus += int(catalog["rewards"]["level_up_credits"]) * lv
-	data["credits"] = credits() + credit + bonus
-	return {"track": track, "xp": xp, "credits": credit + bonus, "level_up_credits": bonus,
+	tr["credits"] = int(tr["credits"]) + credit + bonus
+	return {"track": t, "xp": xp, "credits": credit + bonus, "level_up_credits": bonus,
 		"level_before": before, "level_after": after}
 
 
-func _clean_loadout(want: Dictionary) -> Dictionary:
-	var owned: Dictionary = data["owned"]
+func _clean_loadout(tr: Dictionary, want: Dictionary) -> Dictionary:
+	var owned: Dictionary = tr["owned"]
 	var ship_id := str(want.get("ship", "small"))
 	if not owned["ships"].has(ship_id):
 		ship_id = "small"
@@ -153,13 +165,41 @@ func _clean_loadout(want: Dictionary) -> Dictionary:
 	for id in want.get("mods", []):
 		if owned["mods"].has(id) and not mods.has(id) and mods.size() < slots:
 			mods.append(id)
-	var char_id := str(want.get("character", "duck"))
-	if item("characters", char_id).is_empty():
-		char_id = "duck"
 	var design_id := str(want.get("design", "classic"))
 	if not owned["designs"].has(design_id):
 		design_id = "classic"
-	return {"character": char_id, "ship": ship_id, "design": design_id, "mods": mods}
+	return {"ship": ship_id, "design": design_id, "mods": mods}
+
+
+## Accept a profile from the server or disk (also upgrades the older single-wallet shape).
+func _clean_profile(src: Dictionary) -> Dictionary:
+	if src.has("owned") and not (src.get("sp", {}) as Dictionary).has("owned"):
+		src = {"character": src.get("loadout", {}).get("character", "duck"),
+			"sp": {"xp": src.get("sp", {}).get("xp", 0), "credits": src.get("credits", 0),
+				"owned": src["owned"], "loadout": src.get("loadout", {})},
+			"mp": {"xp": src.get("mp", {}).get("xp", 0)}, "stats": src.get("stats", {})}
+	var p := new_profile()
+	if not item("characters", str(src.get("character", ""))).is_empty():
+		p["character"] = str(src["character"])
+	for t in ["sp", "mp"]:
+		var s = src.get(t, {})
+		if not s is Dictionary:
+			continue
+		var tr: Dictionary = p[t]
+		tr["xp"] = int(s.get("xp", 0))
+		tr["credits"] = int(s.get("credits", 0))
+		var owned = s.get("owned", {})
+		if owned is Dictionary:
+			for kind in ["ships", "mods", "designs"]:
+				for id in owned.get(kind, []):
+					if not item(kind, str(id)).is_empty() and not tr["owned"][kind].has(str(id)):
+						tr["owned"][kind].append(str(id))
+		tr["loadout"] = _clean_loadout(tr, s.get("loadout", {}) if s.get("loadout") is Dictionary else {})
+	var stats = src.get("stats", {})
+	if stats is Dictionary:
+		for key in p["stats"].keys():
+			p["stats"][key] = int(stats.get(key, 0))
+	return p
 
 
 # --- Actions (guest: local; account: server) ----------------------------------------------
@@ -168,69 +208,87 @@ func start_guest() -> void:
 	mode = "guest"
 	token = ""
 	username = ""
+	needs_pilot_pick = true
 	_save()
 	changed.emit()
 
 
 ## Single-player run over. Returns the reward (also emitted as `rewarded`).
-func report_run(score: int, level: int) -> Dictionary:
+func report_run(score: int, lvl: int) -> Dictionary:
 	if is_account():
-		var res := await _api("POST", "/api/run", {"score": score, "level": level})
+		var res := await _api("POST", "/api/run", {"score": score, "level": lvl})
 		if res.has("error"):
 			return {}
 		_apply_server_profile(res["profile"])
-		_reward(res["reward"])
+		rewarded.emit(res["reward"])
 		return res["reward"]
 	var r := catalog["rewards"] as Dictionary
 	data["stats"]["sp_runs"] = int(data["stats"]["sp_runs"]) + 1
 	data["stats"]["sp_best"] = maxi(int(data["stats"]["sp_best"]), score)
-	var reward := _grant("sp", score + int(r["xp_per_level_reached"]) * level,
-		score / int(r["score_per_credit"]) + int(r["credits_per_level_reached"]) * level)
+	var reward := _grant("sp", score + int(r["xp_per_level_reached"]) * lvl,
+		score / int(r["score_per_credit"]) + int(r["credits_per_level_reached"]) * lvl)
 	_save()
-	_reward(reward)
+	changed.emit()
+	rewarded.emit(reward)
 	return reward
 
 
 ## Race rewards come from the server over the race connection (see net.gd).
 func apply_race_reward(reward: Dictionary, profile: Dictionary) -> void:
 	_apply_server_profile(profile)
-	_reward(reward)
+	rewarded.emit(reward)
 
 
-## Returns "" on success or an error message.
-func buy(kind: String, id: String) -> String:
+## Buy in one mode's shop. Returns "" on success or an error message.
+func buy(t: String, kind: String, id: String) -> String:
 	if is_account():
-		var res := await _api("POST", "/api/buy", {"kind": kind, "id": id})
+		var res := await _api("POST", "/api/buy", {"track": t, "kind": kind, "id": id})
 		if res.has("error"):
 			return str(res["error"])
 		_apply_server_profile(res["profile"])
 		return ""
 	var it := item(kind, id)
+	var mode_name: String = TRACK_NAMES[t]
 	if it.is_empty():
 		return "That item doesn't exist."
-	if owns(kind, id):
+	if owns(t, kind, id):
 		return "You already own that."
-	if not shop_open():
-		return "The shop opens at level %d." % int(catalog["shop_level"])
-	if pilot_level() < int(it["level"]):
-		return "Unlocks at level %d." % int(it["level"])
-	if credits() < int(it["price"]):
+	if not shop_open(t):
+		return "The %s shop opens at %s level %d." % [mode_name, mode_name, int(catalog["shop_level"])]
+	if level(t) < int(it["level"]):
+		return "Unlocks at %s level %d." % [mode_name, int(it["level"])]
+	if credits(t) < int(it["price"]):
 		return "Not enough credits."
-	data["credits"] = credits() - int(it["price"])
-	data["owned"][kind].append(id)
+	data[t]["credits"] = credits(t) - int(it["price"])
+	data[t]["owned"][kind].append(id)
 	_save()
 	changed.emit()
 	return ""
 
 
-## Change pilot / ship / design / fitted mods. Anything not owned is dropped.
-func set_loadout(changes: Dictionary) -> void:
-	var want := (loadout() as Dictionary).duplicate(true)
+## Change one mode's ship / design / fitted mods. Anything not owned is dropped.
+func set_loadout(t: String, changes: Dictionary) -> void:
+	var want := (loadout(t) as Dictionary).duplicate(true)
 	want.merge(changes, true)
-	data["loadout"] = _clean_loadout(want)
+	data[t]["loadout"] = _clean_loadout(data[t], want)
 	changed.emit()
 	if is_account():
-		var res := await _api("POST", "/api/loadout", data["loadout"])
+		var body: Dictionary = (data[t]["loadout"] as Dictionary).duplicate()
+		body["track"] = t
+		var res := await _api("POST", "/api/loadout", body)
+		if not res.has("error"):
+			_apply_server_profile(res["profile"])
+	else:
+		_save()
+
+
+func set_character(id: String) -> void:
+	if item("characters", id).is_empty():
+		return
+	data["character"] = id
+	changed.emit()
+	if is_account():
+		var res := await _api("POST", "/api/character", {"character": id})
 		if not res.has("error"):
 			_apply_server_profile(res["profile"])
 	else:
@@ -241,7 +299,10 @@ func set_loadout(changes: Dictionary) -> void:
 func signup(user: String, password: String) -> String:
 	var guest := data.duplicate(true) if is_guest() else {}
 	var res := await _api("POST", "/api/signup", {"username": user, "password": password, "guest": guest}, false)
-	return _logged_in(res)
+	var err := _logged_in(res)
+	if err == "":
+		needs_pilot_pick = true
+	return err
 
 
 func login(user: String, password: String) -> String:
@@ -274,6 +335,11 @@ func refresh() -> bool:
 	return true  # offline: keep the cached copy
 
 
+## Global top pilots: mode "sp" (best score) or "mp" (win rate). {rows} or {error}.
+func leaderboard(board: String) -> Dictionary:
+	return await _api("GET", "/api/leaderboard?mode=" + board, {}, false)
+
+
 func _logged_in(res: Dictionary) -> String:
 	if res.has("error"):
 		return str(res["error"])
@@ -285,18 +351,9 @@ func _logged_in(res: Dictionary) -> String:
 
 func _apply_server_profile(profile: Dictionary) -> void:
 	username = str(profile.get("username", username))
-	var p := new_profile()
-	for key in p.keys():
-		if profile.has(key):
-			p[key] = profile[key]
-	data = p
+	data = _clean_profile(profile)
 	_save()
 	changed.emit()
-
-
-func _reward(reward: Dictionary) -> void:
-	last_reward = reward
-	rewarded.emit(reward)
 
 
 # --- Server calls -------------------------------------------------------------------------
@@ -347,12 +404,7 @@ func _load() -> void:
 	username = str(cfg.get_value("profile", "username", ""))
 	var saved = cfg.get_value("profile", "data", {})
 	if saved is Dictionary:
-		var p := new_profile()
-		for key in p.keys():
-			if saved.has(key):
-				p[key] = saved[key]
-		data = p
-		data["loadout"] = _clean_loadout(data["loadout"])
+		data = _clean_profile(saved)
 	if mode == "account" and token == "":
 		mode = ""
 

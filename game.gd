@@ -6,7 +6,6 @@ const Station := preload("res://station.gd")
 const Rocket := preload("res://rocket.gd")
 const PlanetNode := preload("res://planet.gd")
 const StarLayer := preload("res://star_layer.gd")
-const ScoreboardService := preload("res://scoreboard_service.gd")
 const ModInfo := preload("res://mods.gd")
 const ModIcon := preload("res://mod_icon.gd")
 const Rivals := preload("res://rivals.gd")
@@ -14,6 +13,7 @@ const ProfileUI := preload("res://profile_ui.gd")
 const Animals := preload("res://animals.gd")
 const PauseInput := preload("res://pause_input.gd")
 const PilotCard := preload("res://pilot_card.gd")
+const HangarBG := preload("res://hangar_bg.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.
@@ -129,6 +129,10 @@ var profile_ui: Node
 var profile_label: Label
 var profile_avatar: Control
 var account_button: Button
+## Single Player / Multiplayer sub-menu, and which one is open ("" = main menu).
+var mode_menu: Control
+var _menu_track := ""
+var hangar_bg: Control
 ## Checked the saved login with the server once per game session.
 static var _profile_checked: bool = false
 
@@ -234,7 +238,8 @@ var touch_ui: bool = OS.has_feature("mobile") or OS.has_feature("web_android") o
 @onready var online_list: GridContainer = $UI/Root/Scoreboard/Panel/VBox/OnlineList
 @onready var local_list: GridContainer = $UI/Root/Scoreboard/Panel/VBox/LocalList
 @onready var scoreboard_back: Button = $UI/Root/Scoreboard/Panel/VBox/BackButton
-var scoreboard_service: Node
+var _score_tab := "sp"
+var _score_tabs: HBoxContainer
 
 @onready var settings: Control = $UI/Root/Settings
 @onready var difficulty_option: OptionButton = $UI/Root/Settings/Panel/VBox/DifficultyRow/DifficultyOption
@@ -282,13 +287,9 @@ func _ready() -> void:
 	rocket.area_entered.connect(_on_rocket_hit)
 
 	# Menu
-	start_button.pressed.connect(_go_to_pad)
-	scoreboard_button.pressed.connect(_open_scoreboard)
+	start_button.pressed.connect(_open_mode_menu.bind("sp"))
+	scoreboard_button.pressed.connect(_open_scoreboard.bind(""))
 	scoreboard_back.pressed.connect(_show_menu)
-	scoreboard_service = ScoreboardService.new()
-	add_child(scoreboard_service)
-	scoreboard_service.top_scores_loaded.connect(_on_online_scores)
-	scoreboard_service.top_scores_failed.connect(_on_online_failed)
 	settings_button.pressed.connect(_open_settings)
 	quit_button.pressed.connect(func() -> void: get_tree().quit())
 	# A web page can't close its own tab, so Quit would only freeze the game there.
@@ -348,7 +349,7 @@ func _ready() -> void:
 		_go_to_pad()
 	elif Profile.mode == "":
 		_show_menu()
-		_open_profile_page("account")  # first launch: log in, sign up or play as guest
+		_open_profile_page("account", "sp")  # first launch: log in, sign up or play as guest
 	else:
 		_show_menu()
 
@@ -380,6 +381,8 @@ func _process(delta: float) -> void:
 
 	_update_tips(delta)
 	_update_pilot_cards()
+	if hangar_bg and hangar_bg.visible != (state == State.MENU):
+		hangar_bg.visible = state == State.MENU
 	var show_pause := _can_pause()
 	if pause_button.visible != show_pause:
 		pause_button.visible = show_pause
@@ -428,6 +431,7 @@ func _update_layout() -> void:
 	_position_boost_button()
 	_position_tip_panel(console_height)
 	_position_pilot_cards(console_height)
+	_place_menus()
 	# Ship mods panel mirrors the tips panel on the left side.
 	mod_panel.offset_bottom = tip_panel.offset_bottom
 	mod_panel.offset_top = mod_panel.offset_bottom - 1.0
@@ -444,7 +448,7 @@ func _show_menu() -> void:
 	state = State.MENU
 	rocket.active = false
 	rocket.flame_on = false
-	best_label.text = "Best: %d" % int(best_score)
+	best_label.visible = false  # best score is shown in the Single Player menu
 	_update_profile_line()
 	if profile_ui and profile_ui.screen:
 		profile_ui.screen.visible = false
@@ -460,25 +464,113 @@ func _show_menu() -> void:
 	launch_prompt.visible = false
 	if mp_screen:
 		mp_screen.visible = false
+	if mode_menu:
+		mode_menu.visible = false
+	_menu_track = ""
+	if hangar_bg:
+		hangar_bg.show_loadout("sp")
 	menu.visible = true
 	start_button.grab_focus()
 	queue_redraw()
 
 
-func _open_scoreboard() -> void:
+## Scoreboard with two tabs: Single Player (best scores) and Multiplayer (win rate, then best
+## race score). Global lists come from the server; the lower list is your own record.
+func _open_scoreboard(tab := "") -> void:
+	if tab != "":
+		_score_tab = tab
 	menu.visible = false
+	mode_menu.visible = false
 	scoreboard.visible = true
-	scoreboard_back.grab_focus()
-	_fill_local_scores()
-	# Global list: asks the online service (reports "offline" until a server is hooked up).
+	var vbox := online_list.get_parent()
+	if _score_tabs == null:
+		_score_tabs = HBoxContainer.new()
+		_score_tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+		_score_tabs.add_theme_constant_override("separation", 8)
+		for spec in [["Single Player", "sp"], ["Multiplayer", "mp"]]:
+			var b := Button.new()
+			b.text = spec[0]
+			b.toggle_mode = true
+			b.custom_minimum_size = Vector2(190, 42)
+			b.add_theme_font_size_override("font_size", 20)
+			b.pressed.connect(_open_scoreboard.bind(spec[1]))
+			_score_tabs.add_child(b)
+		vbox.add_child(_score_tabs)
+		vbox.move_child(_score_tabs, 1)
+	for i in 2:
+		(_score_tabs.get_child(i) as Button).button_pressed = (i == 0) == (_score_tab == "sp")
+	(_score_tabs.get_child(0 if _score_tab == "sp" else 1) as Button).grab_focus()
+	var online_header: Label = vbox.get_node("OnlineHeader")
+	var local_header: Label = vbox.get_node("LocalHeader")
+	if _score_tab == "sp":
+		online_header.text = "TOP PILOTS · BEST SCORE"
+		local_header.text = "YOUR BEST RUNS (THIS DEVICE)"
+		_fill_local_scores()
+	else:
+		online_header.text = "TOP RACERS · WIN RATE (min. 3 races)"
+		local_header.text = "YOUR RACE RECORD"
+		_fill_race_record()
 	online_list.visible = false
-	if scoreboard_service.is_configured():
-		online_lamp.on = false
-		_set_online_status("Connecting to scoreboard server…", Color(0.9, 0.85, 0.5))
-	scoreboard_service.fetch_top(8)
+	online_lamp.on = false
+	_set_online_status("Connecting to the scoreboard…", Color(0.9, 0.85, 0.5))
+	var board := _score_tab
+	var res: Dictionary = await Profile.leaderboard(board)
+	if not is_instance_valid(online_list) or not scoreboard.visible or _score_tab != board:
+		return
+	if res.has("rows"):
+		_show_leaderboard(board, res["rows"])
+	else:
+		online_lamp.on = true
+		_set_online_status("CAUTION: Can't reach the scoreboard server right now.\nYour own record is below.", Color(1, 0.6, 0.45))
+
+
+func _show_leaderboard(board: String, rows: Array) -> void:
+	_set_online_status("ONLINE · Global rankings", Color(0.45, 1, 0.6))
+	_clear_grid(online_list)
+	if rows.is_empty():
+		online_list.columns = 1
+		_grid_row(online_list, ["No pilots ranked yet. Be the first!"], Color(0.65, 0.68, 0.75))
+		online_list.visible = true
+		return
+	if board == "sp":
+		online_list.columns = 4
+		_grid_row(online_list, ["#", "PILOT", "BEST SCORE", "LEVEL"], Color(0.55, 0.6, 0.7))
+	else:
+		online_list.columns = 5
+		_grid_row(online_list, ["#", "PILOT", "WIN RATE", "WINS", "BEST RACE"], Color(0.55, 0.6, 0.7))
+	for i in rows.size():
+		var row = rows[i]
+		if not row is Dictionary:
+			continue
+		var me: bool = Profile.is_account() and str(row.get("name", "")) == Profile.username
+		var color := Color(1, 0.85, 0.45) if me else Color(0.9, 0.92, 1)
+		var name := str(row.get("name", "?")).left(14)
+		if board == "sp":
+			_grid_row(online_list, ["%d" % (i + 1), name, "%d" % int(row.get("best", 0)),
+				"Lvl %d" % int(row.get("level", 1))], color)
+		else:
+			_grid_row(online_list, ["%d" % (i + 1), name, "%d%%" % int(row.get("rate", 0)),
+				"%d / %d" % [int(row.get("wins", 0)), int(row.get("races", 0))], "%d" % int(row.get("best", 0))], color)
+	online_list.visible = true
+
+
+func _fill_race_record() -> void:
+	_clear_grid(local_list)
+	if not Profile.is_account():
+		local_list.columns = 1
+		_grid_row(local_list, ["Log in to race and get ranked."], Color(0.65, 0.68, 0.75))
+		return
+	var st: Dictionary = Profile.data["stats"]
+	var races := int(st["mp_races"])
+	local_list.columns = 4
+	_grid_row(local_list, ["RACES", "WINS", "WIN RATE", "BEST RACE"], Color(0.55, 0.6, 0.7))
+	_grid_row(local_list, ["%d" % races, "%d" % int(st["mp_wins"]),
+		"%d%%" % roundi(100.0 * int(st["mp_wins"]) / races) if races > 0 else "-", "%d" % int(st["mp_best"])],
+		Color(1, 0.85, 0.45))
 
 
 func _fill_local_scores() -> void:
+	local_list.columns = 4
 	_clear_grid(local_list)
 	if local_runs.is_empty():
 		_grid_row(local_list, ["", "No runs yet. Go fly!", "", ""], Color(0.65, 0.68, 0.75))
@@ -490,30 +582,6 @@ func _fill_local_scores() -> void:
 		var color := Color(1, 0.85, 0.45) if i == 0 else Color(0.9, 0.92, 1)
 		_grid_row(local_list, ["%d" % (i + 1), "%d" % int(run.get("score", 0)),
 			"Lvl %d · %s" % [lvl, _planet(lvl)["name"]], str(run.get("date", ""))], color)
-
-
-func _on_online_scores(rows: Array) -> void:
-	_set_online_status("ONLINE · Global top pilots", Color(0.45, 1, 0.6))
-	online_lamp.on = false
-	_clear_grid(online_list)
-	_grid_row(online_list, ["#", "NAME", "SCORE", "LEVEL"], Color(0.55, 0.6, 0.7))
-	for i in rows.size():
-		var row = rows[i]
-		if row is Dictionary:
-			_grid_row(online_list, ["%d" % (i + 1), str(row.get("name", "?")).left(12),
-				"%d" % int(row.get("score", 0)), "Lvl %d" % int(row.get("level", 1))], Color(0.9, 0.92, 1))
-	online_list.visible = true
-
-
-## Online scoreboard not available: blinking caution lamp + notice, while your local runs
-## still show below.
-func _on_online_failed(reason: String) -> void:
-	online_lamp.on = true
-	if reason == "offline":
-		_set_online_status("CAUTION: Online scoreboard unavailable at this time.\nGlobal rankings are coming soon. Your own best runs are below.", Color(1, 0.8, 0.45))
-	else:
-		_set_online_status("CAUTION: Can't reach the scoreboard server right now (%s).\nPlease try again later." % reason, Color(1, 0.6, 0.45))
-	online_list.visible = false
 
 
 func _set_online_status(text: String, color: Color) -> void:
@@ -554,6 +622,8 @@ func _open_settings() -> void:
 func _go_to_pad() -> void:
 	state = State.READY
 	ready_time = 0.0
+	if mode_menu:
+		mode_menu.visible = false
 	menu.visible = false
 	settings.visible = false
 	rocket.active = false
@@ -2033,7 +2103,7 @@ func _make_multiplayer_ui() -> void:
 	multiplayer_button.custom_minimum_size = start_button.custom_minimum_size
 	multiplayer_button.add_theme_font_size_override("font_size", 24)
 	start_button.add_sibling(multiplayer_button)
-	multiplayer_button.pressed.connect(_open_multiplayer)
+	multiplayer_button.pressed.connect(_open_mode_menu.bind("mp"))
 
 	# Same look as the Settings screen: copy its frame, then fill it in code.
 	mp_screen = settings.duplicate(0)
@@ -2076,7 +2146,10 @@ func _open_multiplayer() -> void:
 func _close_multiplayer() -> void:
 	if Net.in_room():
 		Net.leave_room()
-	_show_menu()
+	if Profile.is_account():
+		_open_mode_menu("mp")
+	else:
+		_show_menu()
 
 
 func _clear_mp() -> void:
@@ -2180,7 +2253,7 @@ func _show_mp_need_account() -> void:
 		16, Color(0.8, 0.84, 0.92))
 	var b := _mp_button("Log In / Sign Up", func() -> void:
 		mp_screen.visible = false
-		_open_profile_page("account"))
+		_open_profile_page("account", "mp"))
 	_mp_button("Back", _close_multiplayer)
 	b.grab_focus()
 
@@ -2234,7 +2307,12 @@ func _make_profile_ui() -> void:
 	profile_ui = ProfileUI.new()
 	add_child(profile_ui)
 	profile_ui.setup(settings)
-	profile_ui.closed.connect(_show_menu)
+	profile_ui.closed.connect(_on_profile_closed)
+
+	# The hangar the menu sits in, with your rocket on its launch platform.
+	hangar_bg = HangarBG.new()
+	$UI/Root.add_child(hangar_bg)
+	$UI/Root.move_child(hangar_bg, cockpit.get_index() + 1)  # covers the cockpit view in menus
 
 	var vbox := start_button.get_parent()
 	# Who's flying: avatar + name + levels, under the title.
@@ -2251,33 +2329,33 @@ func _make_profile_ui() -> void:
 	vbox.add_child(row)
 	vbox.move_child(row, best_label.get_index() + 1)
 
-	# Hangar + Shop side by side, then the account button.
+	# Scoreboard + Settings share a row so the menu stays compact.
 	var pair := HBoxContainer.new()
 	pair.add_theme_constant_override("separation", 8)
-	for spec in [["Hangar", "hangar"], ["Shop", "shop"]]:
-		var b := Button.new()
-		b.text = spec[0]
-		b.custom_minimum_size = Vector2(146, 46)
-		b.add_theme_font_size_override("font_size", 22)
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.pressed.connect(_open_profile_page.bind(spec[1]))
-		pair.add_child(b)
-	multiplayer_button.add_sibling(pair)
-	# Scoreboard + Settings share a row too, so the menu fits short (landscape) screens.
-	var pair2 := HBoxContainer.new()
-	pair2.add_theme_constant_override("separation", 8)
-	scoreboard_button.add_sibling(pair2)
+	scoreboard_button.add_sibling(pair)
 	for b in [scoreboard_button, settings_button]:
 		b.get_parent().remove_child(b)
 		b.custom_minimum_size = Vector2(146, 46)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		pair2.add_child(b)
+		b.add_theme_font_size_override("font_size", 22)
+		pair.add_child(b)
 	account_button = Button.new()
 	account_button.custom_minimum_size = start_button.custom_minimum_size
 	account_button.add_theme_font_size_override("font_size", 22)
-	account_button.pressed.connect(_open_profile_page.bind("account"))
-	pair2.add_sibling(account_button)
+	account_button.pressed.connect(_open_profile_page.bind("account", "sp"))
+	pair.add_sibling(account_button)
+
+	# Single Player / Multiplayer each open a sub-menu: Launch (or Race), Hangar, Shop.
+	mode_menu = settings.duplicate(0)
+	mode_menu.name = "ModeMenu"
+	mode_menu.visible = false
+	settings.add_sibling(mode_menu)
+	var mbox: VBoxContainer = mode_menu.get_node("Panel/VBox")
+	for child in mbox.get_children():
+		mbox.remove_child(child)
+		child.free()
 	_update_profile_line()
+	_place_menus()
 
 	# Once per launch, check the saved login is still valid and pick up the latest progress.
 	if Profile.is_account() and not _profile_checked:
@@ -2285,12 +2363,92 @@ func _make_profile_ui() -> void:
 		Profile.refresh()
 
 
-func _open_profile_page(page: String) -> void:
+## Main menu and mode menus sit beside the hangar rocket: on the right on wide screens,
+## under it on tall (phone) screens.
+func _place_menus() -> void:
+	var portrait := get_window().size.y > get_window().size.x
+	for m in [menu, mode_menu]:
+		if m == null:
+			continue
+		m.anchor_left = 0.0 if portrait else 0.5
+		m.anchor_top = 0.42 if portrait else 0.0
+		m.offset_left = 0.0
+		m.offset_top = 0.0
+
+
+## Sub-menu for one mode: its level, credits, and Launch / Hangar / Shop.
+func _open_mode_menu(track: String) -> void:
+	_show_menu()
+	_menu_track = track
+	hangar_bg.show_loadout(track)
+	if track == "mp" and not Profile.is_account():
+		_open_multiplayer()  # explains that multiplayer needs an account
+		return
 	menu.visible = false
+	mode_menu.visible = true
+	var mbox: VBoxContainer = mode_menu.get_node("Panel/VBox")
+	for child in mbox.get_children():
+		mbox.remove_child(child)
+		child.queue_free()
+	var mode_name := "SINGLE PLAYER" if track == "sp" else "MULTIPLAYER"
+	var title := Label.new()
+	title.text = mode_name
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_color", Color(1, 0.75, 0.35))
+	mbox.add_child(title)
+	var info := Profile.level_info(int(Profile.track(track)["xp"]))
+	var line := Label.new()
+	line.text = "Level %d   ·   %s   ·   %d credits" % [info["level"],
+		"MAX" if int(info["need"]) == 0 else "%d / %d XP" % [info["into"], info["need"]], Profile.credits(track)]
+	if track == "sp":
+		line.text += "
+Best score: %d" % maxi(int(best_score), int(Profile.data["stats"]["sp_best"]))
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	line.add_theme_font_size_override("font_size", 16)
+	line.add_theme_color_override("font_color", Color(0.55, 0.85, 1))
+	mbox.add_child(line)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(300, 12)
+	bar.show_percentage = false
+	bar.max_value = maxi(int(info["need"]), 1)
+	bar.value = int(info["into"]) if int(info["need"]) > 0 else bar.max_value
+	mbox.add_child(bar)
+	var specs := [
+		["Launch" if track == "sp" else "Race Online", _go_to_pad if track == "sp" else _open_multiplayer],
+		["Hangar", _open_profile_page.bind("hangar", track)],
+		["Shop", _open_profile_page.bind("shop", track)],
+		["Back", _show_menu],
+	]
+	var first: Button = null
+	for spec in specs:
+		var b := Button.new()
+		b.text = spec[0]
+		b.custom_minimum_size = Vector2(300, 50)
+		b.add_theme_font_size_override("font_size", 24 if spec[0] != "Back" else 20)
+		b.pressed.connect(spec[1])
+		mbox.add_child(b)
+		if first == null:
+			first = b
+	first.grab_focus()
+
+
+func _open_profile_page(page: String, track := "sp") -> void:
+	menu.visible = false
+	mode_menu.visible = false
 	settings.visible = false
 	scoreboard.visible = false
 	mp_screen.visible = false
-	profile_ui.open(page)
+	hangar_bg.show_loadout(track)
+	profile_ui.open(page, track)
+
+
+## Leaving Hangar / Shop goes back to that mode's sub-menu; other pages to the main menu.
+func _on_profile_closed() -> void:
+	if _menu_track != "" and Profile.mode != "":
+		_open_mode_menu(_menu_track)
+	else:
+		_show_menu()
 
 
 func _update_profile_line() -> void:
@@ -2298,28 +2456,30 @@ func _update_profile_line() -> void:
 		return
 	profile_avatar.animal = Profile.character()
 	if Profile.is_account():
-		profile_label.text = "%s  ·  SP Lvl %d  ·  MP Lvl %d  ·  %d cr" % [
-			Profile.username, Profile.sp_level(), Profile.mp_level(), Profile.credits()]
+		profile_label.text = "%s  ·  SP Lvl %d  ·  MP Lvl %d" % [Profile.username, Profile.sp_level(), Profile.mp_level()]
 		account_button.text = "Pilot Profile"
 	else:
-		profile_label.text = "Guest  ·  Lvl %d  ·  %d cr" % [Profile.sp_level(), Profile.credits()]
+		profile_label.text = "Guest  ·  Single Player Lvl %d" % Profile.sp_level()
 		account_button.text = "Log In / Sign Up"
 
 
 func _on_profile_changed() -> void:
 	_update_profile_line()
+	if hangar_bg:
+		hangar_bg.show_loadout(_menu_track if _menu_track != "" else "sp")
 	if state == State.MENU or state == State.READY:
 		_apply_loadout()
 
 
-## Ship, paint, pilot and starting mods from the hangar.
+## Ship, paint and starting mods from this mode's hangar (races use the multiplayer one).
 func _apply_loadout() -> void:
-	var ship_info := Profile.ship()
+	var track := "mp" if race_mode else "sp"
+	var ship_info := Profile.ship(track)
 	var slots := int(ship_info.get("slots", 2))
 	ship_agility = float(ship_info.get("agility", 1.0))
 	ship_damage = float(ship_info.get("damage", 1.0))
 	rocket.scale = Vector2.ONE * float(ship_info.get("size", 1.0))
-	var d := Profile.design()
+	var d := Profile.design(track)
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
 	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
@@ -2329,7 +2489,7 @@ func _apply_loadout() -> void:
 		player_card.pilot_name = Profile.username if Profile.is_account() else "Guest"
 		player_card.accent = Color.html(str(d.get("main", "#db3333"))).lightened(0.15)
 	var fitted: Array[String] = []
-	for id in Profile.loadout()["mods"]:
+	for id in Profile.loadout(track)["mods"]:
 		fitted.append(str(id))
 	while fitted.size() < slots:
 		fitted.append("")
@@ -2734,36 +2894,188 @@ func _draw_earth(size: Vector2) -> void:
 	if top - 40.0 > size.y:
 		return
 	var center := Vector2(size.x / 2.0, top + radius)
+	var spread := minf(1.0, size.x * 0.9 / radius)  # keeps features on screen at any size
 
-	draw_colored_polygon(_circle_points(center, radius + 28.0), Color(0.55, 0.8, 1.0, 0.35))  # atmosphere glow
-	draw_colored_polygon(_circle_points(center, radius), Color(0.16, 0.42, 0.85))  # oceans
-	# Continents: blobs just inside the surface, spread across the visible top of Earth.
-	var land_size := minf(radius * 0.16, size.x * 0.09)
-	for land in [[-0.42, 1.0], [-0.18, 1.3], [0.12, 0.9], [0.36, 1.2], [0.58, 0.8]]:
-		# Angle offset scaled so blobs stay on screen whether Earth is huge or ball-sized.
-		var angle: float = -PI / 2.0 + land[0] * minf(1.0, size.x * 0.9 / radius)
-		var blob: float = land_size * land[1]
-		var pos: Vector2 = center + Vector2.from_angle(angle) * (radius - blob * 1.05)
-		draw_colored_polygon(_circle_points(pos, blob, 24), Color(0.25, 0.62, 0.3))
-		draw_colored_polygon(_circle_points(pos + Vector2(blob * 0.6, blob * 0.3), blob * 0.6, 20), Color(0.28, 0.66, 0.33))
+	# Landscape around the launch site, sitting on Earth's curve: fades out as you climb.
+	var land_fade := 1.0 - smoothstep(0.25, 0.6, rise)
+	if land_fade > 0.0:
+		_draw_landscape(size, center, radius, land_fade)
 
-	# Launch pad and tower under the rocket.
+	# Atmosphere: layered glow.
+	for i in 3:
+		draw_colored_polygon(_circle_points(center, radius + 36.0 - i * 11.0), Color(0.55, 0.8, 1.0, 0.1 + 0.07 * i))
+	# Oceans: deep blue with shallower water near the coasts.
+	draw_colored_polygon(_circle_points(center, radius), Color(0.12, 0.36, 0.78))
+	draw_colored_polygon(_circle_points(center + Vector2(0, radius * 0.05), radius * 0.95), Color(0.09, 0.28, 0.66))
+
+	# Continents: irregular shapes with forests, grassland, deserts and snowy mountains.
+	# [angle along the surface, size, shape seed, has desert, has mountains]
+	var lands := [[-0.5, 1.0, 1.3, false, true], [-0.22, 1.35, 4.1, true, false], [0.08, 0.85, 2.2, false, false],
+		[0.33, 1.25, 7.7, true, true], [0.58, 0.8, 5.5, false, false], [-0.72, 0.6, 9.1, false, false]]
+	var land_size := minf(radius * 0.15, size.x * 0.085)
+	for land in lands:
+		var angle: float = -PI / 2.0 + float(land[0]) * spread
+		var blob: float = land_size * float(land[1])
+		var pos: Vector2 = center + Vector2.from_angle(angle) * (radius - blob * 0.95)
+		var seed: float = land[2]
+		draw_colored_polygon(_blob(pos + Vector2(0, blob * 0.08), blob * 1.08, seed), Color(0.55, 0.75, 0.55, 0.5))  # shallows
+		draw_colored_polygon(_blob(pos, blob, seed), Color(0.22, 0.56, 0.28))
+		draw_colored_polygon(_blob(pos + Vector2(-blob * 0.2, -blob * 0.15), blob * 0.55, seed + 1.0), Color(0.32, 0.66, 0.34))
+		if land[3]:
+			draw_colored_polygon(_blob(pos + Vector2(blob * 0.3, blob * 0.1), blob * 0.38, seed + 2.0), Color(0.85, 0.74, 0.48))
+		if land[4]:
+			for k in 3:
+				var m := pos + Vector2((k - 1) * blob * 0.22, -blob * 0.05 + absf(k - 1) * blob * 0.08)
+				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.14, blob * 0.1), m + Vector2(0, -blob * 0.16),
+					m + Vector2(blob * 0.14, blob * 0.1)]), Color(0.4, 0.38, 0.34))
+				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.05, -blob * 0.1), m + Vector2(0, -blob * 0.16),
+					m + Vector2(blob * 0.05, -blob * 0.1)]), Color(0.95, 0.96, 1.0))
+	# Polar ice cap (visible once Earth is a ball below you).
+	if rise > 0.5:
+		var cap := center + Vector2(0, -radius * 0.9)
+		draw_colored_polygon(_blob(cap, radius * 0.16, 3.3), Color(0.94, 0.97, 1.0, smoothstep(0.5, 0.8, rise)))
+	# Weather: soft cloud swirls over the surface.
+	for i in 7:
+		var a := -PI / 2.0 + (i - 3) * 0.17 * spread + 0.05
+		var p := center + Vector2.from_angle(a) * (radius - land_size * (0.4 + 0.35 * (i % 3)))
+		draw_colored_polygon(_blob(p, land_size * (0.35 + 0.1 * (i % 2)), 11.0 + i), Color(1, 1, 1, 0.35))
+	# Sphere shading: lit from the top left, darker on the far side.
+	draw_texture_rect(shade_tex, Rect2(center - Vector2(radius, radius), Vector2(radius, radius) * 2.0), false, Color(1, 1, 1, 0.6))
+
+	# Launch complex: pad with hazard stripes, service tower, blast walls and lights.
 	var pad_x := size.x / 2.0
-	draw_rect(Rect2(pad_x - 60.0, top - 8.0, 120.0, 12.0), Color(0.4, 0.42, 0.45))
-	draw_rect(Rect2(pad_x + 38.0, top - 90.0, 8.0, 84.0), Color(0.55, 0.3, 0.25))
-	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 26.0, 5.0), Color(0.55, 0.3, 0.25))
+	draw_rect(Rect2(pad_x - 120.0, top - 4.0, 240.0, 8.0), Color(0.3, 0.32, 0.35))  # apron
+	draw_rect(Rect2(pad_x - 64.0, top - 10.0, 128.0, 12.0), Color(0.42, 0.44, 0.48))
+	for i in 8:
+		if i % 2 == 0:
+			draw_rect(Rect2(pad_x - 64.0 + i * 16.0, top - 10.0, 16.0, 3.0), Color(0.95, 0.75, 0.15))
+	for s in [-1.0, 1.0]:  # blast deflector walls
+		draw_colored_polygon(PackedVector2Array([Vector2(pad_x + s * 64.0, top - 10), Vector2(pad_x + s * 84, top - 2),
+			Vector2(pad_x + s * 84, top + 2), Vector2(pad_x + s * 64, top + 2)]), Color(0.35, 0.37, 0.4))
+	var tc := Color(0.55, 0.3, 0.25)
+	draw_rect(Rect2(pad_x + 38.0, top - 96.0, 4.0, 86.0), tc)
+	draw_rect(Rect2(pad_x + 50.0, top - 96.0, 4.0, 86.0), tc)
+	for i in 6:
+		var y := top - 96.0 + i * 14.0
+		draw_line(Vector2(pad_x + 42, y), Vector2(pad_x + 50, y + 14), tc.darkened(0.2), 1.5)
+		draw_line(Vector2(pad_x + 50, y), Vector2(pad_x + 42, y + 14), tc.darkened(0.2), 1.5)
+	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 34.0, 5.0), tc)  # service arm
+	var blink := fmod(clock, 1.2) < 0.6
+	draw_circle(Vector2(pad_x + 46.0, top - 101.0), 3.0, Color(1, 0.25, 0.2) if blink else Color(0.4, 0.1, 0.1))
+	for s in [-1.0, 1.0]:  # floodlight masts
+		var lx: float = pad_x + s * 105.0
+		draw_line(Vector2(lx, top - 4), Vector2(lx, top - 44), Color(0.5, 0.52, 0.56), 2.0)
+		draw_rect(Rect2(lx - 5, top - 48, 10, 5), Color(1, 0.95, 0.75))
+	draw_rect(Rect2(pad_x - 150.0, top - 18.0, 26.0, 14.0), Color(0.75, 0.77, 0.8))  # control bunker
+	draw_rect(Rect2(pad_x - 146.0, top - 14.0, 6.0, 4.0), Color(0.5, 0.8, 1.0))
+	draw_rect(Rect2(pad_x - 136.0, top - 14.0, 6.0, 4.0), Color(0.5, 0.8, 1.0))
+
+
+## Distant mountains, rolling hills with trees, and a few buildings, all standing on the
+## curve of the Earth so they line up with the ground at any screen size.
+func _draw_landscape(size: Vector2, center: Vector2, radius: float, fade: float) -> void:
+	var ground := func(x: float) -> float:
+		var dx := clampf(x - center.x, -radius, radius)
+		return center.y - sqrt(radius * radius - dx * dx)
+	var step := 12.0
+	# Far mountains: hazy blue with snowy peaks.
+	var far := PackedVector2Array()
+	var peaks: Array[Vector2] = []
+	var x := -step
+	while x <= size.x + step:
+		var hgt := 55.0 + 45.0 * sin(x * 0.011 + 1.3) + 30.0 * sin(x * 0.027 + 0.4) + 14.0 * sin(x * 0.061)
+		var p := Vector2(x, ground.call(x) - maxf(hgt, 18.0))
+		far.append(p)
+		if hgt > 95.0:
+			peaks.append(p)
+		x += step
+	far.append(Vector2(size.x + step, ground.call(size.x + step) + 4.0))
+	far.append(Vector2(-step, ground.call(-step) + 4.0))
+	draw_colored_polygon(far, Color(0.5, 0.62, 0.8, 0.9 * fade))
+	for p in peaks:
+		draw_colored_polygon(PackedVector2Array([p + Vector2(-9, 9), p + Vector2(0, -1), p + Vector2(9, 9)]), Color(0.96, 0.97, 1.0, 0.9 * fade))
+	# Near hills: green, with little pine trees along the tops.
+	var near := PackedVector2Array()
+	x = -step
+	var trees: Array[Vector2] = []
+	while x <= size.x + step:
+		var hgt := 24.0 + 16.0 * sin(x * 0.019 + 2.1) + 10.0 * sin(x * 0.047 + 0.9)
+		var p := Vector2(x, ground.call(x) - hgt)
+		near.append(p)
+		if absf(x - size.x / 2.0) > 150.0 and int(x / step) % 3 == 0:
+			trees.append(p)
+		x += step
+	near.append(Vector2(size.x + step, ground.call(size.x + step) + 4.0))
+	near.append(Vector2(-step, ground.call(-step) + 4.0))
+	draw_colored_polygon(near, Color(0.28, 0.55, 0.3, fade))
+	for t in trees:
+		for k in 2:
+			var tp := t + Vector2(k * 7.0 - 3.0, 2.0)
+			draw_colored_polygon(PackedVector2Array([tp + Vector2(-5, 2), tp + Vector2(0, -12), tp + Vector2(5, 2)]),
+				Color(0.15, 0.38, 0.2, fade))
+	# A few buildings out past the launch site (hangar, offices, tower).
+	var base := size.x / 2.0
+	for spec in [[-260.0, 70.0, 34.0, Color(0.7, 0.72, 0.76)], [-185.0, 30.0, 52.0, Color(0.62, 0.66, 0.72)],
+			[210.0, 54.0, 26.0, Color(0.72, 0.7, 0.66)], [275.0, 22.0, 64.0, Color(0.66, 0.68, 0.74)]]:
+		var bx: float = base + float(spec[0])
+		var gy: float = ground.call(bx)
+		var r := Rect2(bx - float(spec[1]) / 2.0, gy - float(spec[2]), spec[1], spec[2] + 6.0)
+		var col: Color = spec[3]
+		draw_rect(r, Color(col, fade))
+		for wy in range(int(r.position.y) + 6, int(gy) - 4, 9):  # lit windows
+			for wx in range(int(r.position.x) + 4, int(r.end.x) - 4, 8):
+				draw_rect(Rect2(wx, wy, 4, 4), Color(0.55, 0.8, 1.0, 0.75 * fade))
+
+
+## Wobbly round shape (continents, clouds on Earth). Same seed = same shape every frame.
+func _blob(c: Vector2, r: float, seed: float) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in 22:
+		var a := TAU * i / 22.0
+		var k := 0.78 + 0.16 * sin(3.0 * a + seed) + 0.08 * sin(5.0 * a + seed * 2.3)
+		pts.append(c + Vector2(cos(a), sin(a) * 0.82) * r * k)
+	return pts
+
+
+## Clouds scattered at random heights and positions (fixed per game, so they don't jump).
+var _clouds: Array = []
+
+
+func _make_clouds(size: Vector2) -> void:
+	_clouds.clear()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2024
+	var y := size.y - 230.0
+	while y > -size.y * 1.6:
+		var puffs: Array = []
+		var count := rng.randi_range(4, 7)
+		var width := rng.randf_range(50.0, 110.0)
+		for i in count:
+			puffs.append(Vector3(rng.randf_range(-width, width), rng.randf_range(-14.0, 10.0), rng.randf_range(20.0, 40.0)))
+		# Keep clear of the rocket on the pad (middle bottom).
+		var x := rng.randf_range(0.06, 0.94) * size.x
+		if y > size.y - 420.0 and absf(x - size.x / 2.0) < 170.0:
+			x = fmod(x + size.x * 0.4, size.x)
+		_clouds.append({"x": x, "y": y, "puffs": puffs, "scale": rng.randf_range(0.7, 1.25), "alpha": rng.randf_range(0.7, 1.0)})
+		y -= rng.randf_range(70.0, 170.0)
 
 
 func _draw_clouds(size: Vector2, space: float) -> void:
+	if _clouds.is_empty() or absf(float(_clouds[0]["y"]) - (size.y - 230.0)) > 1.0:
+		_make_clouds(size)
 	var offset := _cloud_scroll()
-	var alpha := (1.0 - space) * 0.85
-	for i in 7:
-		var x := fmod(i * 233.0 + 90.0, size.x)
-		var y := size.y - 260.0 - i * 170.0 + offset
-		if y < -80.0 or y > size.y + 80.0:
+	var fade := (1.0 - space) * 0.88
+	for cloud in _clouds:
+		var cy: float = cloud["y"] + offset
+		if cy < -120.0 or cy > size.y + 120.0:
 			continue
-		for puff in [Vector3(0, 0, 38), Vector3(-40, 10, 28), Vector3(42, 8, 30), Vector3(18, -16, 26)]:
-			draw_circle(Vector2(x + puff.x, y + puff.y), puff.z, Color(1, 1, 1, alpha))
+		var cx: float = cloud["x"]
+		var sc: float = cloud["scale"]
+		var a: float = fade * float(cloud["alpha"])
+		for p in cloud["puffs"]:  # soft grey underside first, then the white tops
+			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc + 6.0 * sc), p.z * sc, Color(0.78, 0.82, 0.9, a * 0.8))
+		for p in cloud["puffs"]:
+			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc), p.z * sc * 0.92, Color(1, 1, 1, a))
 
 
 ## Soft round glow (nebulae, planet halos) and sphere shading, made once at startup.

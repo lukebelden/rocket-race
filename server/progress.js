@@ -1,5 +1,9 @@
 // Progression rules (levels, rewards, shop, loadout). Numbers come from ../catalog.json,
 // which the game reads too. profile.gd mirrors these rules for guests (device-only play).
+//
+// Single player and multiplayer are separate tracks, each with its own XP/level, credits,
+// owned items and hangar loadout: what you earn in one mode is spent in that mode's shop,
+// and unlocks follow that mode's level. The animal pilot is shared.
 
 const fs = require("fs");
 const path = require("path");
@@ -8,12 +12,14 @@ const CATALOG_PATH = process.env.CATALOG || path.join(__dirname, "..", "catalog.
 const catalog = JSON.parse(fs.readFileSync(CATALOG_PATH, "utf8"));
 const L = catalog.levels;
 const R = catalog.rewards;
+const TRACKS = ["sp", "mp"];
 
 const byId = (list) => Object.fromEntries(list.map((x) => [x.id, x]));
 const SHIPS = byId(catalog.ships);
 const MODS = byId(catalog.mods);
 const DESIGNS = byId(catalog.designs);
 const CHARACTERS = byId(catalog.characters);
+const TABLES = { ships: SHIPS, mods: MODS, designs: DESIGNS };
 
 /** XP needed to go from `level` to the next one. */
 function xpToNext(level) {
@@ -31,77 +37,92 @@ function levelInfo(xp) {
   return { level, into: rem, need: level >= L.max ? 0 : xpToNext(level) };
 }
 
-function newProfile() {
+function newTrack() {
   return {
-    sp: { xp: 0 },
-    mp: { xp: 0 },
+    xp: 0,
     credits: 0,
     owned: { ships: ["small"], mods: [], designs: ["classic"] },
-    loadout: { character: "duck", ship: "small", design: "classic", mods: [] },
-    stats: { sp_runs: 0, sp_best: 0, mp_races: 0, mp_wins: 0 },
+    loadout: { ship: "small", design: "classic", mods: [] },
   };
 }
 
-/** Highest of the two levels: decides what's unlocked in the shop. */
-function pilotLevel(p) {
-  return Math.max(levelInfo(p.sp.xp).level, levelInfo(p.mp.xp).level);
+function newProfile() {
+  return {
+    character: "duck",
+    sp: newTrack(),
+    mp: newTrack(),
+    stats: { sp_runs: 0, sp_best: 0, mp_races: 0, mp_wins: 0, mp_best: 0 },
+  };
 }
 
 const int = (v, max) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
 
-/** Make any stored/uploaded profile safe and complete (unknown ids dropped, numbers clamped). */
+function cleanTrack(input) {
+  const t = newTrack();
+  if (!input || typeof input !== "object") return t;
+  t.xp = int(input.xp, 1e9);
+  t.credits = int(input.credits, 1e9);
+  const lvl = levelInfo(t.xp).level;
+  const owned = input.owned || {};
+  for (const kind of ["ships", "mods", "designs"]) {
+    const out = new Set(t.owned[kind]);
+    for (const id of Array.isArray(owned[kind]) ? owned[kind] : []) {
+      if (TABLES[kind][id] && TABLES[kind][id].level <= lvl) out.add(id);
+    }
+    t.owned[kind] = [...out];
+  }
+  t.loadout = cleanLoadout(t, input.loadout || {});
+  return t;
+}
+
+/** Make any stored/uploaded profile safe and complete (unknown ids dropped, numbers clamped).
+ *  Also upgrades the older single-wallet profile shape (credits/owned/loadout at the top). */
 function sanitize(input, { allowMp = true } = {}) {
   const p = newProfile();
   if (!input || typeof input !== "object") return p;
-  p.sp.xp = int(input.sp && input.sp.xp, 1e9);
-  p.mp.xp = allowMp ? int(input.mp && input.mp.xp, 1e9) : 0;
-  p.credits = int(input.credits, 1e9);
-  const lvl = pilotLevel(p);
-  const owned = input.owned || {};
-  const keep = (list, table, base) => {
-    const out = new Set(base);
-    for (const id of Array.isArray(list) ? list : []) {
-      if (table[id] && table[id].level <= lvl) out.add(id);
-    }
-    return [...out];
-  };
-  p.owned.ships = keep(owned.ships, SHIPS, ["small"]);
-  p.owned.mods = keep(owned.mods, MODS, []);
-  p.owned.designs = keep(owned.designs, DESIGNS, ["classic"]);
+  const legacy = input.owned && !(input.sp && input.sp.owned);
+  if (legacy) {
+    input = {
+      character: input.loadout && input.loadout.character,
+      sp: { xp: input.sp && input.sp.xp, credits: input.credits, owned: input.owned, loadout: input.loadout },
+      mp: { xp: input.mp && input.mp.xp },
+      stats: input.stats,
+    };
+  }
+  p.character = CHARACTERS[input.character] ? input.character : "duck";
+  p.sp = cleanTrack(input.sp);
+  p.mp = allowMp ? cleanTrack(input.mp) : newTrack();
   const stats = input.stats || {};
   p.stats = {
     sp_runs: int(stats.sp_runs, 1e9),
     sp_best: int(stats.sp_best, 1e9),
     mp_races: allowMp ? int(stats.mp_races, 1e9) : 0,
     mp_wins: allowMp ? int(stats.mp_wins, 1e9) : 0,
+    mp_best: allowMp ? int(stats.mp_best, 1e9) : 0,
   };
-  p.loadout = cleanLoadout(p, input.loadout || {});
   return p;
 }
 
-/** A loadout limited to things the profile owns, with no more mods than the ship has slots. */
-function cleanLoadout(p, want) {
-  const ship = p.owned.ships.includes(want.ship) ? want.ship : p.owned.ships.includes(p.loadout.ship) ? p.loadout.ship : "small";
+/** A loadout limited to what this track owns, with no more mods than the ship has slots. */
+function cleanLoadout(track, want) {
+  const owned = track.owned;
+  const ship = owned.ships.includes(want.ship) ? want.ship : owned.ships.includes(track.loadout && track.loadout.ship) ? track.loadout.ship : "small";
   const mods = [];
   for (const id of Array.isArray(want.mods) ? want.mods : []) {
-    if (p.owned.mods.includes(id) && !mods.includes(id) && mods.length < SHIPS[ship].slots) mods.push(id);
+    if (owned.mods.includes(id) && !mods.includes(id) && mods.length < SHIPS[ship].slots) mods.push(id);
   }
-  return {
-    character: CHARACTERS[want.character] ? want.character : "duck",
-    ship,
-    design: p.owned.designs.includes(want.design) ? want.design : "classic",
-    mods,
-  };
+  return { ship, design: owned.designs.includes(want.design) ? want.design : "classic", mods };
 }
 
-/** Add XP + credits to one track ("sp" or "mp"); level-ups pay a bonus. Returns a summary. */
+/** Add XP + credits to one track; level-ups pay a bonus. Returns a summary. */
 function grant(p, track, xp, credits) {
-  const before = levelInfo(p[track].xp).level;
-  p[track].xp += xp;
-  const after = levelInfo(p[track].xp).level;
+  const t = p[track];
+  const before = levelInfo(t.xp).level;
+  t.xp += xp;
+  const after = levelInfo(t.xp).level;
   let bonus = 0;
   for (let lv = before + 1; lv <= after; lv++) bonus += R.level_up_credits * lv;
-  p.credits += credits + bonus;
+  t.credits += credits + bonus;
   return { track, xp, credits: credits + bonus, level_up_credits: bonus, level_before: before, level_after: after };
 }
 
@@ -128,23 +149,35 @@ function raceReward(p, { score, levelReached, rank, finished, racers }) {
   }
   if (finished) xp += R.race_finish_xp;
   p.stats.mp_races++;
+  p.stats.mp_best = Math.max(p.stats.mp_best, score);
   if (rank === 1 && racers >= 2) p.stats.mp_wins++;
   return grant(p, "mp", xp, credits);
 }
 
-/** Buy a ship / mod / design. Returns an error message, or "" on success. */
-function buy(p, kind, id) {
-  const table = { ships: SHIPS, mods: MODS, designs: DESIGNS }[kind];
-  const item = table && table[id];
+/** Buy a ship / mod / design in one mode's shop. Returns an error message, or "" on success. */
+function buy(p, track, kind, id) {
+  if (!TRACKS.includes(track)) return "Unknown shop.";
+  const item = TABLES[kind] && TABLES[kind][id];
   if (!item) return "That item doesn't exist.";
-  if (p.owned[kind].includes(id)) return "You already own that.";
-  const lvl = pilotLevel(p);
-  if (lvl < catalog.shop_level) return `The shop opens at level ${catalog.shop_level}.`;
-  if (lvl < item.level) return `Unlocks at level ${item.level}.`;
-  if (p.credits < item.price) return "Not enough credits.";
-  p.credits -= item.price;
-  p.owned[kind].push(id);
+  const t = p[track];
+  if (t.owned[kind].includes(id)) return "You already own that.";
+  const lvl = levelInfo(t.xp).level;
+  const mode = track === "sp" ? "Single Player" : "Multiplayer";
+  if (lvl < catalog.shop_level) return `The ${mode} shop opens at ${mode} level ${catalog.shop_level}.`;
+  if (lvl < item.level) return `Unlocks at ${mode} level ${item.level}.`;
+  if (t.credits < item.price) return "Not enough credits.";
+  t.credits -= item.price;
+  t.owned[kind].push(id);
   return "";
 }
 
-module.exports = { catalog, levelInfo, newProfile, sanitize, cleanLoadout, singleReward, raceReward, buy, pilotLevel, SHIPS };
+function setLoadout(p, track, want) {
+  if (!TRACKS.includes(track)) return;
+  p[track].loadout = cleanLoadout(p[track], want || {});
+}
+
+function setCharacter(p, id) {
+  if (CHARACTERS[id]) p.character = id;
+}
+
+module.exports = { catalog, levelInfo, newProfile, sanitize, singleReward, raceReward, buy, setLoadout, setCharacter, SHIPS };

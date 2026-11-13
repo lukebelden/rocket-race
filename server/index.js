@@ -86,8 +86,10 @@ function serveStatic(req, res) {
 //   POST /api/logout                                  (Authorization: Bearer <token>)
 //   GET  /api/me                                      -> {profile}
 //   POST /api/run     {score, level}                  -> {profile, reward}   single-player run
-//   POST /api/buy     {kind: ships|mods|designs, id}  -> {profile}
-//   POST /api/loadout {character, ship, design, mods} -> {profile}
+//   POST /api/buy     {track: sp|mp, kind: ships|mods|designs, id}  -> {profile}
+//   POST /api/loadout {track: sp|mp, ship, design, mods}            -> {profile}
+//   POST /api/character {character}                                 -> {profile}
+//   GET  /api/leaderboard?mode=sp|mp   (public)  -> {rows: [...]}
 
 const loginAttempts = new Map(); // ip -> {count, since}
 
@@ -139,6 +141,10 @@ async function handleApi(req, res, url) {
       if (result.error) return json(res, 400, { error: result.error });
       return json(res, 200, { token: result.token, profile: accounts.view(result.user) });
     }
+    if (route === "GET /api/leaderboard") {
+      const mode = url.searchParams.get("mode") === "mp" ? "mp" : "sp";
+      return json(res, 200, { mode, rows: accounts.leaderboard(mode) });
+    }
     const user = accounts.userForToken(token);
     if (!user) return json(res, 401, { error: "Please log in again." });
     if (route === "POST /api/logout") {
@@ -153,13 +159,18 @@ async function handleApi(req, res, url) {
       return json(res, 200, { profile: accounts.view(user), reward });
     }
     if (route === "POST /api/buy") {
-      const error = progress.buy(user.profile, String(body.kind), String(body.id));
+      const error = progress.buy(user.profile, String(body.track), String(body.kind), String(body.id));
       if (error) return json(res, 400, { error });
       accounts.save(user);
       return json(res, 200, { profile: accounts.view(user) });
     }
+    if (route === "POST /api/character") {
+      progress.setCharacter(user.profile, String(body.character));
+      accounts.save(user);
+      return json(res, 200, { profile: accounts.view(user) });
+    }
     if (route === "POST /api/loadout") {
-      user.profile.loadout = progress.cleanLoadout(user.profile, body);
+      progress.setLoadout(user.profile, String(body.track), body);
       accounts.save(user);
       return json(res, 200, { profile: accounts.view(user) });
     }
@@ -228,7 +239,7 @@ function freeColor(room) {
 function addPlayer(room, client) {
   // Pick up the latest hangar choice (the pilot may have changed since logging in).
   const fresh = accounts.userForToken(client.token);
-  if (fresh) client.character = fresh.profile.loadout.character;
+  if (fresh) client.character = fresh.profile.character;
   const player = {
     id: client.id,
     ws: client.ws,
@@ -331,7 +342,7 @@ function handle(client, msg) {
       if (!user) return send(client.ws, { t: "auth_failed", msg: "Log in to play multiplayer." });
       client.token = msg.token;
       client.username = user.username;
-      client.character = user.profile.loadout.character;
+      client.character = user.profile.character;
       send(client.ws, { t: "auth_ok", username: user.username });
       break;
     }
