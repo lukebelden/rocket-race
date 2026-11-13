@@ -28,6 +28,8 @@ var email: String = ""
 ## {character, sp: track, mp: track, stats}; track = {xp, credits, owned: {ships, mods, designs},
 ## loadout: {ship, design, mods}}
 var data: Dictionary = {}
+## Admin accounts are the dev team: they can pick dev-only pilots (the Penguin).
+var is_dev: bool = false
 ## Set for brand-new players: the game shows the "choose your pilot" screen once.
 var needs_pilot_pick: bool = false
 
@@ -126,6 +128,11 @@ func design(t: String) -> Dictionary:
 
 func character() -> String:
 	return str(data.get("character", "duck"))
+
+
+## Pilots you can pick: everyone gets the normal ones; dev-only pilots only for devs.
+func characters() -> Array:
+	return items("characters").filter(func(c) -> bool: return is_dev or not bool(c.get("dev", false)))
 
 
 func character_name(id: String) -> String:
@@ -285,7 +292,8 @@ func set_loadout(t: String, changes: Dictionary) -> void:
 
 
 func set_character(id: String) -> void:
-	if item("characters", id).is_empty():
+	var it := item("characters", id)
+	if it.is_empty() or (bool(it.get("dev", false)) and not is_dev):
 		return
 	data["character"] = id
 	changed.emit()
@@ -321,6 +329,7 @@ func logout() -> void:
 
 
 func _forget_login() -> void:
+	is_dev = false
 	mode = ""
 	token = ""
 	username = ""
@@ -412,6 +421,7 @@ func _logged_in(res: Dictionary) -> String:
 func _apply_server_profile(profile: Dictionary) -> void:
 	username = str(profile.get("username", username))
 	email = str(profile.get("email", email))
+	is_dev = bool(profile.get("admin", false))
 	data = _clean_profile(profile)
 	_save()
 	changed.emit()

@@ -228,7 +228,9 @@ async function handleApi(req, res, url) {
       return json(res, 200, { profile: accounts.view(user) });
     }
     if (route === "POST /api/character") {
-      progress.setCharacter(user.profile, String(body.character));
+      if (!progress.setCharacter(user.profile, String(body.character), user.admin)) {
+        return json(res, 403, { error: "That pilot isn't available." });
+      }
       accounts.save(user);
       return json(res, 200, { profile: accounts.view(user) });
     }

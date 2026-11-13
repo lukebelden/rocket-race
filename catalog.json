@@ -24,7 +24,8 @@
     { "id": "cat", "name": "Cat" },
     { "id": "bear", "name": "Bear" },
     { "id": "raccoon", "name": "Raccoon" },
-    { "id": "monkey", "name": "Monkey" }
+    { "id": "monkey", "name": "Monkey" },
+    { "id": "penguin", "name": "Penguin", "dev": true }
   ],
   "ships": [
     { "id": "small", "name": "Scout", "desc": "1 mod slot. Small and nimble, but takes more damage.", "level": 1, "price": 0, "slots": 1, "agility": 1.25, "size": 0.85, "damage": 1.3 },

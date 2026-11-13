@@ -14,6 +14,8 @@ var mood: String = "normal":
 	set(value):
 		mood = value
 		queue_redraw()
+## Scarf / suit trim colour for the full-body pilot.
+var accent: Color = Color("f0893c")
 
 var _t := 0.0
 var _blink_at := 2.0
@@ -35,8 +37,12 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var r := minf(size.x, size.y) * 0.36
 	var blink := _t >= _blink_at and _t < _blink_at + 0.13
+	if size.y >= size.x * 1.2:  # tall avatar: the whole chibi pilot
+		var h := minf(size.y * 0.94, size.x * 1.45)
+		draw_pilot(self, Vector2(size.x / 2.0, size.y * 0.97), h, animal, mood, blink, accent)
+		return
+	var r := minf(size.x, size.y) * 0.36
 	draw_face(self, size / 2.0 + Vector2(0, r * 0.08), r, animal, mood, blink)
 
 
@@ -52,6 +58,7 @@ static func fur(id: String) -> Color:
 		"bear": return Color(0.56, 0.37, 0.23)
 		"raccoon": return Color(0.6, 0.6, 0.64)
 		"monkey": return Color(0.52, 0.34, 0.21)
+		"penguin": return Color("262b40")
 	return Color(0.8, 0.8, 0.85)
 
 
@@ -79,7 +86,7 @@ static func _shade(canvas: CanvasItem, c: Vector2, r: float) -> void:
 static func _eyes(canvas: CanvasItem, c: Vector2, r: float, mood: String, blink: bool,
 		spread := 0.36, y := -0.08, size := 1.0, iris := Color(0.25, 0.17, 0.1), mask := false) -> void:
 	var ink := Color(0.08, 0.07, 0.1)
-	var er := r * 0.17 * size
+	var er := r * 0.2 * size  # big, expressive eyes
 	for s in [-1.0, 1.0]:
 		var e: Vector2 = c + Vector2(s * r * spread, r * y)
 		match mood:
@@ -100,9 +107,10 @@ static func _eyes(canvas: CanvasItem, c: Vector2, r: float, mood: String, blink:
 			continue
 		var big := 1.18 if mood == "excited" or mood == "worried" else 1.0
 		canvas.draw_circle(e, er * big, Color(1, 1, 1))
-		canvas.draw_circle(e + Vector2(0, er * 0.12), er * 0.68 * big, iris)
-		canvas.draw_circle(e + Vector2(0, er * 0.12), er * 0.4 * big, ink)
-		canvas.draw_circle(e + Vector2(-er * 0.28, -er * 0.22), er * 0.24, Color(1, 1, 1))
+		canvas.draw_circle(e + Vector2(0, er * 0.1), er * 0.76 * big, iris)
+		canvas.draw_circle(e + Vector2(0, er * 0.12), er * 0.46 * big, ink)
+		canvas.draw_circle(e + Vector2(-er * 0.3, -er * 0.26), er * 0.3, Color(1, 1, 1))  # big shine
+		canvas.draw_circle(e + Vector2(er * 0.3, er * 0.34), er * 0.13, Color(1, 1, 1, 0.9))  # small shine
 		if mood == "excited":  # sparkle
 			canvas.draw_circle(e + Vector2(er * 0.3, er * 0.35), er * 0.1, Color(1, 1, 1))
 	# Brows tell the mood quickest.
@@ -155,7 +163,7 @@ static func _whiskers(canvas: CanvasItem, c: Vector2, r: float, color: Color) ->
 # --- Faces -----------------------------------------------------------------------------------
 
 ## Draws an animal face centred on c with head radius r.
-static func draw_face(canvas: CanvasItem, c: Vector2, r: float, id: String, mood := "normal", blink := false) -> void:
+static func draw_face(canvas: CanvasItem, c: Vector2, r: float, id: String, mood := "normal", blink := false, gear := true) -> void:
 	var f := fur(id)
 	match id:
 		"duck":
@@ -264,6 +272,91 @@ static func draw_face(canvas: CanvasItem, c: Vector2, r: float, id: String, mood
 			for s in [-1.0, 1.0]:
 				canvas.draw_circle(c + Vector2(s * r * 0.08, r * 0.24), r * 0.045, Color(0.35, 0.2, 0.1))
 			_mouth(canvas, c + Vector2(0, r * 0.48), r * 0.26, r, mood, Color(0.35, 0.2, 0.1))
+		"penguin":
+			# Dark head, white heart-shaped face, orange beak, rosy cheeks (dev-only pilot).
+			canvas.draw_circle(c, r, f)
+			canvas.draw_colored_polygon(_ellipse(c + Vector2(0, -r * 0.92), r * 0.16, r * 0.1, 0.3), f)  # hair tuft
+			_shade(canvas, c, r)
+			var white := Color("f3f6f8")
+			canvas.draw_circle(c + Vector2(-r * 0.3, -r * 0.05), r * 0.42, white)
+			canvas.draw_circle(c + Vector2(r * 0.3, -r * 0.05), r * 0.42, white)
+			canvas.draw_colored_polygon(_ellipse(c + Vector2(0, r * 0.35), r * 0.6, r * 0.45), white)
+			_cheeks(canvas, c, r, 0.52, 0.22)
+			_eyes(canvas, c, r, mood, blink, 0.3, -0.08, 1.0, Color("1b2140"))
+			var beak := Color("f0893c")
+			var open := mood == "happy" or mood == "excited" or mood == "out"
+			canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-r * 0.2, r * 0.2), c + Vector2(r * 0.2, r * 0.2),
+				c + Vector2(0, r * 0.42)]), beak)
+			if open:
+				canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-r * 0.15, r * 0.36), c + Vector2(r * 0.15, r * 0.36),
+					c + Vector2(0, r * 0.52)]), beak.darkened(0.2))
 		_:
 			canvas.draw_circle(c, r, f)
 			_eyes(canvas, c, r, mood, blink)
+	if gear:
+		_goggles(canvas, c, r, id)
+
+
+## Pilot goggles pushed up on the forehead: strap, two lenses with teal glass and a glint.
+static func _goggles(canvas: CanvasItem, c: Vector2, r: float, id: String) -> void:
+	var y := -0.6 if id != "duck" else -0.66
+	var strap := Color("12152a")
+	var frame := Color("4a5578")
+	var half := r * sqrt(maxf(1.0 - y * y, 0.0)) * 0.98  # strap ends at the edge of the head
+	canvas.draw_rect(Rect2(c + Vector2(-half, r * (y - 0.05)), Vector2(half * 2.0, r * 0.11)), strap)
+	for s in [-1.0, 1.0]:
+		var g := c + Vector2(s * r * 0.24, r * (y - 0.02))
+		canvas.draw_circle(g, r * 0.2, frame)
+		canvas.draw_circle(g, r * 0.14, Color("2c6d6f"))
+		canvas.draw_circle(g + Vector2(-r * 0.05, -r * 0.05), r * 0.05, Color("a8e2d4"))
+	canvas.draw_rect(Rect2(c + Vector2(-r * 0.06, r * (y - 0.04)), Vector2(r * 0.12, r * 0.07)), frame)  # bridge
+
+
+## Whole chibi pilot standing on `foot` (bottom centre), `h` tall: big head with goggles,
+## flight suit, vest with pouches and a chest strap, belt, scarf in `accent`, gloves, boots.
+static func draw_pilot(canvas: CanvasItem, foot: Vector2, h: float, id: String, mood := "normal",
+		blink := false, accent := Color("f0893c")) -> void:
+	var r := h * 0.25
+	var head := foot + Vector2(0, -h + r * 1.08)
+	var suit := Color("2c6d6f") if id != "penguin" else Color("262b40")
+	var suit_dark := suit.darkened(0.25)
+	var vest := Color("36405f")
+	var ink := Color("12152a")
+	var neck_y := head.y + r * 0.82
+	var hip_y := foot.y - h * 0.22
+	var tw := r * 1.25  # torso width
+
+	# Legs and boots.
+	for s in [-1.0, 1.0]:
+		var lx: float = foot.x + s * tw * 0.24
+		canvas.draw_rect(Rect2(lx - r * 0.2, hip_y - r * 0.1, r * 0.4, foot.y - hip_y - r * 0.12), suit_dark)
+		canvas.draw_colored_polygon(_ellipse(Vector2(lx + s * r * 0.06, foot.y - r * 0.12), r * 0.3, r * 0.17), ink)
+	# Torso (suit), then the vest over it.
+	var torso := Rect2(foot.x - tw / 2.0, neck_y, tw, hip_y - neck_y + r * 0.1)
+	canvas.draw_colored_polygon(_ellipse(torso.get_center(), tw * 0.55, torso.size.y * 0.58), suit)
+	var vest_r := Rect2(torso.position.x + tw * 0.08, neck_y + r * 0.12, tw * 0.84, torso.size.y * 0.72)
+	canvas.draw_rect(vest_r, vest)
+	canvas.draw_rect(Rect2(vest_r.end.x - vest_r.size.x * 0.28, vest_r.position.y, vest_r.size.x * 0.28, vest_r.size.y), vest.darkened(0.2))
+	if id == "penguin":  # white belly peeking out of the open vest
+		canvas.draw_colored_polygon(_ellipse(Vector2(foot.x, vest_r.get_center().y + r * 0.05), tw * 0.2, vest_r.size.y * 0.42), Color("f3f6f8"))
+	for s in [-1.0, 1.0]:  # pouches
+		var px: float = foot.x + s * tw * 0.24 - r * 0.13
+		canvas.draw_rect(Rect2(px, vest_r.end.y - r * 0.42, r * 0.26, r * 0.3), Color("4a5578"))
+		canvas.draw_rect(Rect2(px, vest_r.end.y - r * 0.42, r * 0.26, r * 0.08), vest.darkened(0.25))
+	canvas.draw_line(Vector2(vest_r.position.x + r * 0.08, vest_r.position.y), Vector2(vest_r.end.x - r * 0.1, vest_r.end.y - r * 0.5), ink, maxf(r * 0.09, 1.5))  # chest strap
+	canvas.draw_rect(Rect2(torso.position.x + tw * 0.05, hip_y - r * 0.12, tw * 0.9, r * 0.14), ink)  # belt
+	canvas.draw_rect(Rect2(foot.x - r * 0.09, hip_y - r * 0.13, r * 0.18, r * 0.16), Color("ffc56b"))  # buckle
+	# Arms with gloves (one waves when excited/happy).
+	for s in [-1.0, 1.0]:
+		var shoulder := Vector2(foot.x + s * tw * 0.5, neck_y + r * 0.22)
+		var hand := shoulder + Vector2(s * r * 0.3, r * 0.85)
+		if s > 0.0 and (mood == "excited" or mood == "happy"):
+			hand = shoulder + Vector2(r * 0.55, -r * 0.55)
+		canvas.draw_line(shoulder, hand, suit, r * 0.3)
+		canvas.draw_circle(shoulder, r * 0.15, suit)
+		canvas.draw_circle(hand, r * 0.17, ink)
+	# Scarf: wrap around the neck plus a tail fluttering to the side.
+	canvas.draw_colored_polygon(_ellipse(Vector2(foot.x, neck_y + r * 0.04), tw * 0.42, r * 0.17), accent)
+	canvas.draw_colored_polygon(PackedVector2Array([Vector2(foot.x + tw * 0.15, neck_y), Vector2(foot.x + tw * 0.62, neck_y + r * 0.12),
+		Vector2(foot.x + tw * 0.55, neck_y + r * 0.32), Vector2(foot.x + tw * 0.1, neck_y + r * 0.14)]), accent.darkened(0.15))
+	draw_face(canvas, head, r, id, mood, blink, true)

@@ -267,7 +267,7 @@ func _render_account() -> void:
 		_label("PILOT PROFILE", 40, GOLD)
 		var top := _row()
 		var av := _avatar(Profile.character())
-		av.custom_minimum_size = Vector2(70, 70)
+		av.custom_minimum_size = Vector2(76, 112)  # full-body pilot
 		top.add_child(av)
 		var names := VBoxContainer.new()
 		names.custom_minimum_size.x = 360  # give the name/email room (a column inside a row gets no width otherwise)
@@ -533,7 +533,7 @@ func _render_hangar() -> void:
 
 	_label("PILOT", 17, GOLD, inner)
 	var pilots := _flow(inner)
-	for c in Profile.items("characters"):
+	for c in Profile.characters():
 		var id := str(c["id"])
 		_card(pilots, str(c["name"]), "", Profile.character() == id, false,
 			func() -> void: Profile.set_character(id), _avatar(id))
@@ -679,13 +679,13 @@ func _render_pick() -> void:
 	_label("Who's flying? You can change this any time in the Hangar.", 16, SOFT)
 	var flow := _flow(box)
 	flow.custom_minimum_size.x = 620
-	for c in Profile.items("characters"):
+	for c in Profile.characters():
 		var id := str(c["id"])
 		var b := _card(flow, str(c["name"]), "", _pick == id, false, func() -> void:
 			_pick = id
 			_render(), _avatar(id))
-		b.custom_minimum_size = Vector2(140, 150)
-		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(96, 96)
+		b.custom_minimum_size = Vector2(130, 196)
+		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(96, 150)  # tall = full-body pilot
 	var go := _button("Let's Fly as %s!" % Profile.character_name(_pick), func() -> void:
 		Profile.needs_pilot_pick = false
 		Profile.set_character(_pick)

@@ -107,8 +107,9 @@ func _draw() -> void:
 		Vector2(head.x - r * 0.45, head.y + r * 0.72), Vector2(head.x + r * 0.45, head.y + r * 0.72),
 		Vector2(head.x + r * 1.0, head.y + r * 0.9), Vector2(head.x + r * 1.15, desk_y + 2)])
 	draw_colored_polygon(body, suit)
-	draw_colored_polygon(PackedVector2Array([head + Vector2(-r * 0.4, r * 0.75), head + Vector2(r * 0.4, r * 0.75),
-		head + Vector2(0, r * 1.15)]), Palette.TEXT)  # collar
+	draw_colored_polygon(Animals._ellipse(head + Vector2(0, r * 0.86), r * 0.62, r * 0.2), accent if not out else Palette.SLATE)  # scarf
+	draw_colored_polygon(PackedVector2Array([head + Vector2(r * 0.2, r * 0.86), head + Vector2(r * 0.75, r * 1.05),
+		head + Vector2(r * 0.62, r * 1.3), head + Vector2(r * 0.12, r * 1.05)]), (accent if not out else Palette.SLATE).darkened(0.15))
 	draw_circle(head + Vector2(-r * 0.62, r * 1.12), r * 0.12, Palette.AMBER)  # badge
 
 	Animals.draw_face(self, head, r, animal, m, _t >= _blink_at and _t < _blink_at + 0.13)

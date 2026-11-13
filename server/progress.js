@@ -89,7 +89,7 @@ function sanitize(input, { allowMp = true, checkLevels = false } = {}) {
       stats: input.stats,
     };
   }
-  p.character = CHARACTERS[input.character] ? input.character : "duck";
+  p.character = CHARACTERS[input.character] && !(checkLevels && CHARACTERS[input.character].dev) ? input.character : "duck";
   p.sp = cleanTrack(input.sp, checkLevels);
   p.mp = allowMp ? cleanTrack(input.mp, checkLevels) : newTrack();
   const stats = input.stats || {};
@@ -176,8 +176,12 @@ function setLoadout(p, track, want) {
   p[track].loadout = cleanLoadout(p[track], want || {});
 }
 
-function setCharacter(p, id) {
-  if (CHARACTERS[id]) p.character = id;
+/** Pick a pilot. Dev-only pilots (catalog "dev": true, e.g. the Penguin) need an admin account. */
+function setCharacter(p, id, isDev = false) {
+  const c = CHARACTERS[id];
+  if (!c || (c.dev && !isDev)) return false;
+  p.character = id;
+  return true;
 }
 
 module.exports = { catalog, levelInfo, newProfile, sanitize, singleReward, raceReward, buy, setLoadout, setCharacter, SHIPS };

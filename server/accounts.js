@@ -164,13 +164,17 @@ function loadProfile(row) {
 }
 
 function toUser(row) {
-  return { id: row.id, username: row.username, email: row.email || "", profile: loadProfile(row) };
+  const user = { id: row.id, username: row.username, email: row.email || "", admin: !!row.is_admin, profile: loadProfile(row) };
+  // A dev-only pilot (Penguin) on a non-admin account (e.g. admin removed) falls back to Duck.
+  const c = progress.catalog.characters.find((x) => x.id === user.profile.character);
+  if (c && c.dev && !user.admin) user.profile.character = "duck";
+  return user;
 }
 
 /** Public view sent to the game: the profile plus account name/email and computed levels. */
 function view(user) {
   const p = user.profile;
-  return { username: user.username, email: user.email || "", ...p,
+  return { username: user.username, email: user.email || "", admin: !!user.admin, ...p,
     sp_level: progress.levelInfo(p.sp.xp), mp_level: progress.levelInfo(p.mp.xp) };
 }
 
