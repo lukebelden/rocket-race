@@ -7,3 +7,6 @@ server/node_modules/
 
 # Secrets (SMTP password etc.)
 .env
+
+# Design preview screenshots
+design-preview/

@@ -6,6 +6,7 @@ extends Control
 ## shared textures so Godot can batch them into very few draw calls - draw calls are the
 ## expensive part on the web (WebGL).
 
+const Palette := preload("res://palette.gd")
 const TOP := 50.0
 const SIDE := 16.0
 
@@ -51,78 +52,51 @@ func _draw_leds() -> void:
 	var cx := size.x / 2.0
 	for i in 5:
 		var on := (_led_mask & (1 << i)) != 0
-		var led := Color(0.3, 1.0, 0.5) if i != 2 else Color(0.4, 0.75, 1.0)
-		_leds.draw_rect(Rect2(cx - 43 + i * 20, TOP + 1, 6, 6), led if on else led.darkened(0.7))
+		var led: Color = Palette.AQUA if i != 2 else Palette.AMBER
+		var r := Rect2(cx - 46 + i * 20, TOP + 2, 12, 5)
+		_leds.draw_rect(r, led if on else Palette.SLATE)
 
 
+## Flat frame (minimal vector style): dark ink bars, rounded inner corners, one thin aqua
+## line where glass meets frame, and a few small lights. No rivets, gradients or stripes.
 func _draw() -> void:
 	var s := size
-	var steel := Color(0.17, 0.19, 0.24)
-	var steel_hi := Color(0.36, 0.4, 0.48)
-	var steel_dark := Color(0.08, 0.09, 0.12)
 	var console_top := s.y - dash_height
-	var window := Rect2(SIDE, TOP, s.x - SIDE * 2.0, console_top - TOP)
+	var frame := Palette.INK
+	var line := Color(Palette.AQUA, 0.35)
 
-	# Window glass: soft shadow along each inner edge (one shared gradient texture)...
-	var depth := 34.0
-	draw_texture_rect(_shadow_tex, Rect2(window.position, Vector2(window.size.x, depth)), false)
-	draw_set_transform(Vector2(window.end.x, window.end.y), PI)
-	draw_texture_rect(_shadow_tex, Rect2(Vector2.ZERO, Vector2(window.size.x, depth)), false)
-	draw_set_transform(Vector2(window.position.x, window.end.y), -PI / 2.0)
-	draw_texture_rect(_shadow_tex, Rect2(Vector2.ZERO, Vector2(window.size.y, depth)), false)
-	draw_set_transform(Vector2(window.end.x, window.position.y), PI / 2.0)
-	draw_texture_rect(_shadow_tex, Rect2(Vector2.ZERO, Vector2(window.size.y, depth)), false)
-	draw_set_transform(Vector2.ZERO)
-	# ...and a couple of faint diagonal reflections.
-	draw_colored_polygon(PackedVector2Array([Vector2(s.x * 0.66, TOP), Vector2(s.x * 0.74, TOP),
-		Vector2(s.x * 0.56, console_top * 0.6), Vector2(s.x * 0.48, console_top * 0.6)]), Color(1, 1, 1, 0.03))
-	draw_colored_polygon(PackedVector2Array([Vector2(s.x * 0.77, TOP), Vector2(s.x * 0.79, TOP),
-		Vector2(s.x * 0.61, console_top * 0.6), Vector2(s.x * 0.59, console_top * 0.6)]), Color(1, 1, 1, 0.03))
+	# Bars: top, sides, console.
+	draw_rect(Rect2(0, 0, s.x, TOP), frame)
+	draw_rect(Rect2(0, 0, SIDE, s.y), frame)
+	draw_rect(Rect2(s.x - SIDE, 0, SIDE, s.y), frame)
+	draw_rect(Rect2(0, console_top, s.x, dash_height), Palette.NAVY)
+	draw_rect(Rect2(0, console_top, s.x, 3), Palette.INDIGO)
 
-	# Top hull bar, side pillars and console: plain rectangles (these batch together).
-	draw_rect(Rect2(0, 0, s.x, TOP), steel)
-	draw_rect(Rect2(0, 0, s.x, 3), steel_hi.darkened(0.2))
-	draw_rect(Rect2(0, TOP - 4, s.x, 4), steel_hi)
-	draw_rect(Rect2(0, TOP, s.x, 3), Color(0, 0, 0, 0.45))
-	draw_rect(Rect2(0, 0, SIDE, s.y), steel)
-	draw_rect(Rect2(s.x - SIDE, 0, SIDE, s.y), steel)
-	draw_rect(Rect2(SIDE - 2.0, TOP, 2, console_top - TOP), steel_hi)
-	draw_rect(Rect2(s.x - SIDE, TOP, 2, console_top - TOP), steel_hi)
-	draw_rect(Rect2(0, console_top, s.x, dash_height), steel_dark.lerp(steel, 0.45))
-	draw_rect(Rect2(0, console_top, s.x, 4), steel_hi)
-
-	# Hazard stripe along the console's top edge: one tiled texture.
-	draw_texture_rect(_hazard_tex, Rect2(0, console_top + 4.0, s.x, 6), true)
-
-	# Centre housing for the status LEDs.
-	var cx := s.x / 2.0
-	draw_colored_polygon(PackedVector2Array([Vector2(cx - 90, TOP - 2), Vector2(cx + 90, TOP - 2),
-		Vector2(cx + 70, TOP + 12), Vector2(cx - 70, TOP + 12)]), steel)
-	draw_rect(Rect2(cx - 70, TOP + 11, 140, 2), steel_hi)
-
-	# Window braces in the inner corners.
-	var brace := 46.0
-	var rivets: Array[Vector2] = []
+	# Rounded inner corners of the window (flat quarter-circle fillets).
+	var r := 22.0
 	for corner in [[Vector2(SIDE, TOP), 1.0, 1.0], [Vector2(s.x - SIDE, TOP), -1.0, 1.0],
 			[Vector2(SIDE, console_top), 1.0, -1.0], [Vector2(s.x - SIDE, console_top), -1.0, -1.0]]:
 		var p: Vector2 = corner[0]
 		var dx: float = corner[1]
 		var dy: float = corner[2]
-		draw_colored_polygon(PackedVector2Array([p, p + Vector2(brace * dx, 0), p + Vector2(0, brace * dy)]), steel)
-		rivets.append(p + Vector2(12 * dx, 12 * dy))
+		# Corner p, then an arc around centre p + (dx*r, dy*r) that bows toward p.
+		var centre := p + Vector2(dx * r, dy * r)
+		var pts := PackedVector2Array([p])
+		for k in 9:
+			var a := PI / 2.0 * k / 8.0
+			pts.append(centre + Vector2(-dx * r * cos(a), -dy * r * sin(a)))
+		draw_colored_polygon(pts, frame if dy > 0.0 else Palette.NAVY)
 
-	# Rivets: all the same small texture, so they're a single batched draw.
-	var rx := 40.0
-	while rx < s.x - 30.0:
-		rivets.append(Vector2(rx, TOP - 12.0))
-		rx += 90.0
-	for px in [8.0, s.x - 8.0]:
-		var ry := TOP + 40.0
-		while ry < console_top - 20.0:
-			rivets.append(Vector2(px, ry))
-			ry += 90.0
-	for at in rivets:
-		draw_texture_rect(_rivet_tex, Rect2(at - Vector2(4, 4), Vector2(8, 8)), false)
+	# Thin aqua edge where the glass meets the frame.
+	draw_line(Vector2(SIDE + r, TOP), Vector2(s.x - SIDE - r, TOP), line, 1.5)
+	draw_line(Vector2(SIDE, TOP + r), Vector2(SIDE, console_top - r), line, 1.5)
+	draw_line(Vector2(s.x - SIDE, TOP + r), Vector2(s.x - SIDE, console_top - r), line, 1.5)
+
+	# Centre tab for the status lights.
+	var cx := s.x / 2.0
+	draw_colored_polygon(PackedVector2Array([Vector2(cx - 76, TOP - 1), Vector2(cx + 76, TOP - 1),
+		Vector2(cx + 64, TOP + 12), Vector2(cx - 64, TOP + 12)]), frame)
+
 
 
 func _make_textures() -> void:
