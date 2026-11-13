@@ -254,5 +254,10 @@ function pilot(animal) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260" width="200" height="260"><defs>${defs}</defs>${s}</svg>`;
 }
 
-for (const a of Object.keys(HEADS)) fs.writeFileSync(path.join(__dirname, a + ".svg"), pilot(a));
-console.log("wrote", Object.keys(HEADS).length, "pilots");
+if (require.main === module) {
+  for (const a of Object.keys(HEADS)) fs.writeFileSync(path.join(__dirname, a + ".svg"), pilot(a));
+  console.log("wrote", Object.keys(HEADS).length, "pilots");
+}
+// Shared drawing kit for other characters (duck.js etc).
+module.exports = { INK, part, flat, line, E, C, R, P, shine, lighten, shade,
+  resetDefs: () => { uid = 0; defs = ""; }, takeDefs: () => defs, addDef: (d) => { defs += d; } };
