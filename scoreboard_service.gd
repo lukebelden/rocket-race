@@ -4,7 +4,7 @@ extends Node
 ##
 ## ─── How to connect it later ─────────────────────────────────────────────────────────────
 ## 1. Deploy an endpoint at  <API_URL>/api/scores  (Vercel: an `api/scores.js` file in the repo)
-## 2. Put its base address below, e.g.  const API_URL := "https://rocket-dodge.vercel.app"
+## 2. Put its base address below, e.g.  const API_URL := "https://rocket-dodge-gilt.vercel.app"
 ## 3. Re-export the game. That's it - submitting and the global list start working.
 ##
 ## The endpoint must accept/return JSON:

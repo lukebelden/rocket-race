@@ -525,7 +525,7 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.75, 0.35, 1)
 theme_override_font_sizes/font_size = 44
-text = "ROCKET DODGE"
+text = "ROCKET RACE"
 horizontal_alignment = 1
 
 [node name="BestLabel" type="Label" parent="UI/Root/Menu/Panel/VBox"]

@@ -1,5 +1,5 @@
 extends Node2D
-## Rocket Dodge: launch from Earth, fly past the planets, dodge the asteroids.
+## Rocket Race: launch from Earth, fly past the planets, dodge the asteroids.
 
 const Obstacle := preload("res://obstacle.gd")
 const Station := preload("res://station.gd")
