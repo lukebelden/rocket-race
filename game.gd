@@ -4,6 +4,8 @@ extends Node2D
 const Obstacle := preload("res://obstacle.gd")
 const Station := preload("res://station.gd")
 const Rocket := preload("res://rocket.gd")
+## How big the player's rocket is drawn in flight (on top of the ship type's own size).
+const ROCKET_SCALE := 1.35
 const PlanetNode := preload("res://planet.gd")
 const StarLayer := preload("res://star_layer.gd")
 const ModInfo := preload("res://mods.gd")
@@ -438,7 +440,7 @@ func _update_layout() -> void:
 	cockpit.dash_height = console_height
 	dashboard.columns = 2 if portrait else 4
 	dashboard.offset_top = -console_height + 14.0
-	rocket.bottom_gap = console_height + 65.0
+	rocket.bottom_gap = console_height + 65.0 + 50.0 * (ROCKET_SCALE - 1.0)  # room for the bigger flame
 	_position_boost_button()
 	_position_tip_panel(console_height)
 	_position_pilot_cards(console_height)
@@ -1466,7 +1468,7 @@ func _fire_missile() -> void:
 	Sound.play("missile")
 	missile_cooldown = ModInfo.MISSILE_COOLDOWN
 	missiles.append({
-		"pos": rocket.position + Vector2(0, -30),
+		"pos": rocket.position + Vector2(0, -30) * rocket.scale.y,
 		"vel": Vector2(rocket.velocity_x * 0.3, -520),
 		"target": target,
 		"age": 0.0,
@@ -2540,7 +2542,7 @@ func _apply_loadout() -> void:
 	var slots := int(ship_info.get("slots", 2))
 	ship_agility = float(ship_info.get("agility", 1.0))
 	ship_damage = float(ship_info.get("damage", 1.0))
-	rocket.scale = Vector2.ONE * float(ship_info.get("size", 1.0))
+	rocket.scale = Vector2.ONE * float(ship_info.get("size", 1.0)) * ROCKET_SCALE
 	rocket.ship = str(Profile.loadout(track)["ship"])
 	var d := Profile.design(track)
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
@@ -2946,7 +2948,7 @@ func _draw() -> void:
 
 	# Detached booster pods tumbling away.
 	for pod in pods:
-		draw_set_transform(pod["pos"], pod["rot"])
+		draw_set_transform(pod["pos"], pod["rot"], rocket.scale)
 		Rocket.draw_pod(self, Vector2.ZERO)
 	draw_set_transform(Vector2.ZERO)
 
@@ -2957,11 +2959,8 @@ func _draw() -> void:
 			draw_polyline(trail, Color(1, 0.7, 0.35, 0.45), 3.0)
 		var vel: Vector2 = m["vel"]
 		draw_set_transform(m["pos"], vel.angle() + PI / 2.0)
-		draw_colored_polygon(PackedVector2Array([Vector2(-3, 10), Vector2(3, 10), Vector2(0, 19 + randf() * 6)]), Color(1, 0.7, 0.25))
-		draw_rect(Rect2(-3, -8, 6, 18), Color(0.92, 0.93, 0.96))
-		draw_colored_polygon(PackedVector2Array([Vector2(-3, -8), Vector2(3, -8), Vector2(0, -15)]), Color(1, 0.35, 0.3))
-		draw_colored_polygon(PackedVector2Array([Vector2(-3, 4), Vector2(-7, 11), Vector2(-3, 10)]), Color(0.8, 0.25, 0.22))
-		draw_colored_polygon(PackedVector2Array([Vector2(3, 4), Vector2(7, 11), Vector2(3, 10)]), Color(0.8, 0.25, 0.22))
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.5, 12.5), Vector2(2.5, 12.5), Vector2(0, 22 + randf() * 6)]), Color(1, 0.7, 0.25))
+		Rocket.draw_missile(self, Vector2.ZERO, 1.3)
 	draw_set_transform(Vector2.ZERO)
 
 
