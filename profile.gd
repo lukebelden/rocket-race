@@ -32,6 +32,8 @@ var email: String = ""
 var data: Dictionary = {}
 ## Admin accounts are the dev team: they can pick dev-only pilots (the Penguin).
 var is_dev: bool = false
+## Restricted pilots (e.g. Titan) an admin has given this account access to.
+var granted_pilots: Array = []
 ## Set for brand-new players: the game shows the "choose your pilot" screen once.
 var needs_pilot_pick: bool = false
 
@@ -134,7 +136,13 @@ func character() -> String:
 
 ## Pilots you can pick: everyone gets the normal ones; dev-only pilots only for devs.
 func characters() -> Array:
-	return items("characters").filter(func(c) -> bool: return is_dev or not bool(c.get("dev", false)))
+	return items("characters").filter(func(c) -> bool: return can_fly(str(c.get("id", ""))))
+
+
+## Restricted pilots need an admin account or access given on the admin page.
+func can_fly(id: String) -> bool:
+	var it := item("characters", id)
+	return not it.is_empty() and (is_dev or not bool(it.get("dev", false)) or granted_pilots.has(id))
 
 
 func character_name(id: String) -> String:
@@ -295,7 +303,7 @@ func set_loadout(t: String, changes: Dictionary) -> void:
 
 func set_character(id: String) -> void:
 	var it := item("characters", id)
-	if it.is_empty() or (bool(it.get("dev", false)) and not is_dev):
+	if it.is_empty() or not can_fly(id):
 		return
 	data["character"] = id
 	changed.emit()
@@ -332,6 +340,7 @@ func logout() -> void:
 
 func _forget_login() -> void:
 	is_dev = false
+	granted_pilots = []
 	mode = ""
 	token = ""
 	username = ""
@@ -424,6 +433,7 @@ func _apply_server_profile(profile: Dictionary) -> void:
 	username = str(profile.get("username", username))
 	email = str(profile.get("email", email))
 	is_dev = bool(profile.get("admin", false))
+	granted_pilots = profile.get("pilots", []) if profile.get("pilots") is Array else []
 	data = _clean_profile(profile)
 	_save()
 	changed.emit()

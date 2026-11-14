@@ -340,7 +340,7 @@ async function handleAdminApi(req, res, url) {
       console.log(`Admin ${admin.username} created test account ${result.username}`);
       return json(res, 200, accounts.getPlayer(result.username));
     }
-    const pm = url.pathname.match(/^\/api\/admin\/players\/([A-Za-z0-9_]{1,16})(\/adjust|\/item|\/delete)?$/);
+    const pm = url.pathname.match(/^\/api\/admin\/players\/([A-Za-z0-9_]{1,16})(\/adjust|\/item|\/pilot|\/delete)?$/);
     if (pm) {
       if (req.method === "GET" && !pm[2]) {
         const p = accounts.getPlayer(pm[1]);
@@ -356,6 +356,8 @@ async function handleAdminApi(req, res, url) {
         const body = await readJson(req);
         const result = pm[2] === "/adjust"
           ? accounts.adjustPlayer(admin.username, pm[1], String(body.track), body.xp, body.credits)
+          : pm[2] === "/pilot"
+          ? accounts.setPlayerPilot(admin.username, pm[1], String(body.id), !!body.granted)
           : accounts.setPlayerItem(admin.username, pm[1], String(body.track), String(body.kind), String(body.id), !!body.owned);
         if (result.error) return json(res, 400, { error: result.error });
         console.log(`Admin ${admin.username} edited player ${pm[1]}`);

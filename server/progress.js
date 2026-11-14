@@ -52,6 +52,8 @@ function newTrack() {
 function newProfile() {
   return {
     character: DEFAULT_CHARACTER,
+    // Restricted pilots (catalog "dev": true) an admin has given this player access to.
+    pilots: [],
     sp: newTrack(),
     mp: newTrack(),
     stats: { sp_runs: 0, sp_best: 0, mp_races: 0, mp_wins: 0, mp_best: 0 },
@@ -94,6 +96,9 @@ function sanitize(input, { allowMp = true, checkLevels = false } = {}) {
   }
   const wanted = CHARACTERS[input.character] ? input.character : OLD_CHARACTERS[input.character];
   p.character = wanted && !(checkLevels && CHARACTERS[wanted].dev) ? wanted : DEFAULT_CHARACTER;
+  // Pilot access grants only ever come from the admin page, never from an uploaded guest save.
+  p.pilots = checkLevels || !Array.isArray(input.pilots) ? []
+    : [...new Set(input.pilots.filter((id) => CHARACTERS[id] && CHARACTERS[id].dev))];
   p.sp = cleanTrack(input.sp, checkLevels);
   p.mp = allowMp ? cleanTrack(input.mp, checkLevels) : newTrack();
   const stats = input.stats || {};
@@ -180,12 +185,18 @@ function setLoadout(p, track, want) {
   p[track].loadout = cleanLoadout(p[track], want || {});
 }
 
-/** Pick a pilot. Dev-only pilots (catalog "dev": true, e.g. the Penguin) need an admin account. */
-function setCharacter(p, id, isDev = false) {
+/** Can this profile fly pilot `id`? Restricted pilots (catalog "dev": true, e.g. Titan) need an
+ *  admin account, or access given to this player on the admin page. */
+function canFly(p, id, isAdmin = false) {
   const c = CHARACTERS[id];
-  if (!c || (c.dev && !isDev)) return false;
+  return !!c && (!c.dev || isAdmin || (p.pilots || []).includes(id));
+}
+
+/** Pick a pilot (see canFly). */
+function setCharacter(p, id, isDev = false) {
+  if (!canFly(p, id, isDev)) return false;
   p.character = id;
   return true;
 }
 
-module.exports = { catalog, levelInfo, newProfile, sanitize, singleReward, raceReward, buy, setLoadout, setCharacter, SHIPS };
+module.exports = { catalog, levelInfo, newProfile, sanitize, singleReward, raceReward, buy, setLoadout, setCharacter, canFly, SHIPS };

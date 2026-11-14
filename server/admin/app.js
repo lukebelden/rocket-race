@@ -296,6 +296,21 @@ function renderPlayer(p, message = "", isError = false) {
       form, ...groups);
   };
 
+  // Restricted pilots (DEV pilots like Titan): admins always have them; anyone else needs access.
+  const granted = p.pilots || [];
+  const pilotCard = el("div", { class: "mode-card" }, el("h3", { text: "Pilot access" }),
+    el("p", { class: "muted", text: p.admin
+      ? "Admin accounts can always fly restricted pilots."
+      : "Give this player a restricted pilot. Click again to take it away." }),
+    el("div", { class: "items" }, ...(p.catalog.pilots || []).map((c) => {
+      const has = p.admin || granted.includes(c.id);
+      return el("button", {
+        class: "item", "aria-pressed": String(has), text: c.name, ...(p.admin ? { disabled: "" } : {}),
+        title: p.admin ? "Admins always have this pilot" : (has ? "Click to remove access" : "Click to give access"),
+        onclick: () => { if (!p.admin) send("pilot", { id: c.id, granted: !has }, `${c.name}: access ${has ? "removed" : "given"}.`); },
+      });
+    })));
+
   const st = p.stats;
   const history = el("ul", { class: "history" }, ...(p.history.length ? p.history.map((h) =>
     el("li", {}, new Date(h.created_at).toLocaleString() + " · ", el("b", { text: h.admin }), ": " + h.action))
@@ -308,6 +323,7 @@ function renderPlayer(p, message = "", isError = false) {
     el("p", { class: "muted", text: `Runs ${st.sp_runs} · best ${st.sp_best}   ·   Races ${st.mp_races} · wins ${st.mp_wins} · best race ${st.mp_best}` }),
     status,
     el("div", { class: "mode-grid" }, ...MODES.map(([track, title]) => modeCard(track, title))),
+    pilotCard,
     el("p", { class: "section-title", text: "Change history" }), history,
     p.test ? el("button", { class: "danger", text: "Delete test account", onclick: async () => {
       if (!confirm(`Delete the test account "${p.username}"? This can't be undone.`)) return;

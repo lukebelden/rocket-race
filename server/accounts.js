@@ -165,9 +165,8 @@ function loadProfile(row) {
 
 function toUser(row) {
   const user = { id: row.id, username: row.username, email: row.email || "", admin: !!row.is_admin, profile: loadProfile(row) };
-  // A dev-only pilot (Titan) on a non-admin account (e.g. admin removed) falls back to Falcon.
-  const c = progress.catalog.characters.find((x) => x.id === user.profile.character);
-  if (c && c.dev && !user.admin) user.profile.character = "falcon";
+  // A restricted pilot (e.g. Titan) the player no longer has access to falls back to Falcon.
+  if (!progress.canFly(user.profile, user.profile.character, user.admin)) user.profile.character = "falcon";
   return user;
 }
 
@@ -537,7 +536,8 @@ function getPlayer(name) {
   view_.test = !!u.is_test;
   view_.history = db.prepare("SELECT created_at, admin, action FROM admin_log WHERE target = ? ORDER BY id DESC LIMIT 30").all(u.username);
   view_.catalog = { ships: progress.catalog.ships.map((s) => s.id), mods: progress.catalog.mods.map((m) => m.id),
-    designs: progress.catalog.designs.map((d) => d.id) };
+    designs: progress.catalog.designs.map((d) => d.id),
+    pilots: progress.catalog.characters.filter((c) => c.dev).map((c) => ({ id: c.id, name: c.name })) };
   return view_;
 }
 
@@ -595,6 +595,21 @@ function setPlayerItem(adminName, name, track, kind, id, owned) {
   return {};
 }
 
+/** Give (or take away) a player's access to a restricted pilot, e.g. the DEV pilot Titan. */
+function setPlayerPilot(adminName, name, id, granted) {
+  const c = progress.catalog.characters.find((x) => x.id === id);
+  if (!c || !c.dev) return { error: "That pilot isn't restricted." };
+  const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
+  if (!u) return { error: "No such player." };
+  const user = toUser(u);
+  const list = user.profile.pilots || [];
+  user.profile.pilots = granted ? [...new Set([...list, id])] : list.filter((x) => x !== id);
+  if (!progress.canFly(user.profile, user.profile.character, user.admin)) user.profile.character = "falcon";
+  save(user);
+  logAdmin(adminName, user.username, `${granted ? "gave" : "removed"} access to pilot "${c.name}"`);
+  return {};
+}
+
 /** Top pilots. sp: best single-player score. mp: win rate (at least MIN_RACES races), then best race score. */
 const MIN_RACES = 3;
 function leaderboard(mode, limit = 10) {
@@ -624,5 +639,5 @@ module.exports = {
   addReport, listReports, setReportStatus, REPORT_CATEGORIES,
   TICKET_STATUSES, listTickets, getTicket, setTicketStatus, addTicketNote,
   setAdmin, listAdmins, adminLogin, adminForToken, adminLogout, ADMIN_SESSION_MS,
-  searchPlayers, getPlayer, adjustPlayer, setPlayerItem, createTestAccount, deleteTestAccount,
+  searchPlayers, getPlayer, adjustPlayer, setPlayerItem, setPlayerPilot, createTestAccount, deleteTestAccount,
 };
