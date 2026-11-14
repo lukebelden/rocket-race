@@ -1,23 +1,23 @@
 extends Node2D
 ## Rocket Race: launch from Earth, fly past the planets, dodge the asteroids.
 
-const Obstacle := preload("res://obstacle.gd")
-const Station := preload("res://station.gd")
-const Rocket := preload("res://rocket.gd")
+const Obstacle := preload("res://scripts/game/obstacle.gd")
+const Station := preload("res://scripts/game/station.gd")
+const Rocket := preload("res://scripts/game/rocket.gd")
 ## How big the player's rocket is drawn in flight (on top of the ship type's own size).
 const ROCKET_SCALE := 1.76
-const PlanetNode := preload("res://planet.gd")
-const StarLayer := preload("res://star_layer.gd")
-const ModInfo := preload("res://mods.gd")
-const ModIcon := preload("res://mod_icon.gd")
-const Rivals := preload("res://rivals.gd")
-const ProfileUI := preload("res://profile_ui.gd")
-const Pilots := preload("res://pilots.gd")
-const PauseInput := preload("res://pause_input.gd")
-const PilotCard := preload("res://pilot_card.gd")
-const HangarBG := preload("res://hangar_bg.gd")
-const RaceIntro := preload("res://race_intro.gd")
-const Palette := preload("res://palette.gd")
+const PlanetNode := preload("res://scripts/game/planet.gd")
+const StarLayer := preload("res://scripts/game/star_layer.gd")
+const ModInfo := preload("res://scripts/game/mods.gd")
+const ModIcon := preload("res://scripts/ui/mod_icon.gd")
+const Rivals := preload("res://scripts/game/rivals.gd")
+const ProfileUI := preload("res://scripts/ui/profile_ui.gd")
+const Pilots := preload("res://scripts/ui/pilots.gd")
+const PauseInput := preload("res://scripts/ui/pause_input.gd")
+const PilotCard := preload("res://scripts/ui/pilot_card.gd")
+const HangarBG := preload("res://scripts/ui/hangar_bg.gd")
+const RaceIntro := preload("res://scripts/game/race_intro.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 ## Multiplayer race: first pilot to fly through this many levels wins.
 const RACE_LEVELS := 5
 ## How many of your best runs the local scoreboard keeps.

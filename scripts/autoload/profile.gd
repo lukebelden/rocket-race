@@ -1,6 +1,6 @@
 extends Node
 
-const Pilots := preload("res://pilots.gd")
+const Pilots := preload("res://scripts/ui/pilots.gd")
 ## Player profile (autoload "Profile"): guest or account, levels, credits, unlocks, loadout.
 ##
 ## Single player ("sp") and multiplayer ("mp") are separate tracks: each has its own XP and

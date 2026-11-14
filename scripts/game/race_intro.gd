@@ -14,9 +14,9 @@ signal hangar_pressed
 signal shop_pressed
 signal leave_pressed
 
-const Pilots := preload("res://pilots.gd")
-const Palette := preload("res://palette.gd")
-const Rocket := preload("res://rocket.gd")
+const Pilots := preload("res://scripts/ui/pilots.gd")
+const Palette := preload("res://scripts/game/palette.gd")
+const Rocket := preload("res://scripts/game/rocket.gd")
 const SLOTS := 4
 const STAGGER := 0.3  # seconds between bays appearing when the screen opens
 

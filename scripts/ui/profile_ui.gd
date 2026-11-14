@@ -6,10 +6,10 @@ extends Node
 
 signal closed
 
-const Pilots := preload("res://pilots.gd")
-const ModIcon := preload("res://mod_icon.gd")
-const ModInfo := preload("res://mods.gd")
-const Rocket := preload("res://rocket.gd")
+const Pilots := preload("res://scripts/ui/pilots.gd")
+const ModIcon := preload("res://scripts/ui/mod_icon.gd")
+const ModInfo := preload("res://scripts/game/mods.gd")
+const Rocket := preload("res://scripts/game/rocket.gd")
 
 const GOLD := Color(1, 0.75, 0.35)
 const SOFT := Color(0.8, 0.84, 0.92)

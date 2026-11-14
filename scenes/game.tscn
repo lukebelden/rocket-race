@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://du6lpk4g4k8yg"]
 
-[ext_resource type="Script" uid="uid://dtmega4teiggx" path="res://game.gd" id="1_game"]
-[ext_resource type="Script" uid="uid://ciqjxbt6ndw4v" path="res://rocket.gd" id="2_rocket"]
-[ext_resource type="Script" path="res://cockpit.gd" id="3_cockpit"]
-[ext_resource type="Script" path="res://caution_light.gd" id="4_caution"]
-[ext_resource type="Script" path="res://mod_icon.gd" id="5_modicon"]
+[ext_resource type="Script" uid="uid://dtmega4teiggx" path="res://scripts/game/game.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://ciqjxbt6ndw4v" path="res://scripts/game/rocket.gd" id="2_rocket"]
+[ext_resource type="Script" path="res://scripts/ui/cockpit.gd" id="3_cockpit"]
+[ext_resource type="Script" path="res://scripts/ui/caution_light.gd" id="4_caution"]
+[ext_resource type="Script" path="res://scripts/ui/mod_icon.gd" id="5_modicon"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rocket"]
 radius = 12.0

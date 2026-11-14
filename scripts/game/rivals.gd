@@ -10,7 +10,7 @@ const PIXELS_PER_UNIT := 160.0
 ## Metres per distance unit, matching the nav beacon's scale (game.gd METERS_PER_PIXEL x fall speed).
 const METERS_PER_UNIT := 1320.0
 
-const Rocket := preload("res://rocket.gd")
+const Rocket := preload("res://scripts/game/rocket.gd")
 ## How see-through the ghost ships are.
 const GHOST_ALPHA := 0.5
 

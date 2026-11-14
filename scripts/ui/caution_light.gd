@@ -1,6 +1,6 @@
 extends Control
 
-const Palette := preload("res://palette.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 ## MASTER CAUTION warning lamp on the console. Blinks red while `on`.
 ## Only redraws when the lamp actually switches between lit and dark.
 

@@ -1,6 +1,6 @@
 extends Node2D
 
-const Palette := preload("res://palette.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 ## The planet you're flying past. Drawn once when the level changes; game.gd just moves it
 ## each frame (moving a node is nearly free, redrawing all these shapes every frame is not).
 

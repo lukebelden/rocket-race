@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Rocket Race"
-run/main_scene="res://game.tscn"
+run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -49,6 +49,6 @@ driver/output_latency.web=100
 
 [autoload]
 
-Profile="*res://profile.gd"
-Sound="*res://sound.gd"
-Net="*res://net.gd"
+Profile="*res://scripts/autoload/profile.gd"
+Sound="*res://scripts/autoload/sound.gd"
+Net="*res://scripts/autoload/net.gd"

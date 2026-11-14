@@ -5,8 +5,8 @@ extends Control
 ## lit launch platform - with the ship, paint and mods from the hangar of the mode you're in.
 ## Landscape: rocket on the left, menu on the right. Portrait: rocket on top, menu below.
 
-const Rocket := preload("res://rocket.gd")
-const Palette := preload("res://palette.gd")
+const Rocket := preload("res://scripts/game/rocket.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 
 var rocket: Area2D
 var _t := 0.0

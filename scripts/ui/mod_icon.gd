@@ -2,7 +2,7 @@ extends Control
 ## Icon for a ship modification (or an empty slot), drawn with simple shapes.
 ## Used in the SHIP MODS panel and on the station's mod cards.
 
-const ModInfo := preload("res://mods.gd")
+const ModInfo := preload("res://scripts/game/mods.gd")
 
 var mod_id: String = "":
 	set(value):

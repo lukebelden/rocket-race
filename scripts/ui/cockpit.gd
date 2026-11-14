@@ -6,7 +6,7 @@ extends Control
 ## shared textures so Godot can batch them into very few draw calls - draw calls are the
 ## expensive part on the web (WebGL).
 
-const Palette := preload("res://palette.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 const TOP := 50.0
 const SIDE := 16.0
 

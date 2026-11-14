@@ -7,8 +7,8 @@ extends Control
 ## low hull -> "worried", crashed -> "out"), and react() shows a mood for a moment (a hit,
 ## a level up, docking).
 
-const Pilots := preload("res://pilots.gd")
-const Palette := preload("res://palette.gd")
+const Pilots := preload("res://scripts/ui/pilots.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 
 ## Pilot id (name kept from the animal-pilot days).
 var animal: String = Pilots.DEFAULT

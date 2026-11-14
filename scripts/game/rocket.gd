@@ -40,8 +40,8 @@ var mods: Array[String] = []
 var missile_count: int = 0
 var _time: float = 0.0
 
-const ModInfo := preload("res://mods.gd")
-const Palette := preload("res://palette.gd")
+const ModInfo := preload("res://scripts/game/mods.gd")
+const Palette := preload("res://scripts/game/palette.gd")
 
 ## Ship sprites (built by art/build_rockets.gd from art/source/rocket_sheet.png).
 ## Ship id from the catalog ("small" / "medium" / "heavy") picks the sprite set.
