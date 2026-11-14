@@ -84,16 +84,17 @@ static func draw_portrait(canvas: CanvasItem, rect: Rect2, id: String, crop := 1
 	canvas.draw_texture_rect_region(tex, rect, source_rect(tex.get_size(), rect.size, crop), modulate)
 
 
-## A chunky low-res square of the head and shoulders (`cols` pixels wide) for pixel monitors.
+## A chunky low-res copy of the portrait (`cols` pixels wide) for pixel monitors: the whole
+## character (full = true), or a square of just the head and shoulders.
 ## Draw it with nearest-neighbour filtering so every pixel shows as a crisp block.
-static func pixel_texture(id: String, cols := 40) -> Texture2D:
-	var key := "%s:%d" % [id_of(id), cols]
+static func pixel_texture(id: String, cols := 40, full := true) -> Texture2D:
+	var key := "%s:%d:%s" % [id_of(id), cols, full]
 	if _pixel_cache.has(key):
 		return _pixel_cache[key]
 	var img := texture(id).get_image()
 	img.decompress()
 	img.convert(Image.FORMAT_RGBA8)
-	var src := source_rect(img.get_size(), Vector2.ONE, 0.78)  # square: head and shoulders
+	var src := Rect2(Vector2.ZERO, img.get_size()) if full else source_rect(img.get_size(), Vector2.ONE, 0.78)
 	var head := img.get_region(Rect2i(src))
 	var rows := int(round(cols * src.size.y / src.size.x))
 	head.resize(cols, rows, Image.INTERPOLATE_LANCZOS)

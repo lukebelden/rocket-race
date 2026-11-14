@@ -96,10 +96,11 @@ func _draw() -> void:
 	draw_rect(scr, PHOSPHOR)
 	var tex := Pilots.pixel_texture(animal, 44 if big else 30)
 	var src := Rect2(Vector2.ZERO, tex.get_size())
-	# Square feed of the pilot; on the big monitor a telemetry column fills the rest.
-	var feed := Rect2(scr.position, Vector2(scr.size.y, scr.size.y))
+	# Feed of the whole pilot (as tall as the screen); on the big monitor a telemetry
+	# column fills the rest.
+	var feed := Rect2(scr.position, Vector2(scr.size.y * src.size.x / src.size.y, scr.size.y))
 	if not big:
-		feed.position.x = scr.get_center().x - scr.size.y / 2.0
+		feed.position.x = scr.get_center().x - feed.size.x / 2.0
 	var full := scr
 	scr = feed
 	var flicker := 0.94 + 0.06 * sin(_t * 31.0) * sin(_t * 7.3)
@@ -214,7 +215,7 @@ func _telemetry(r: Rect2, m: String) -> void:
 	var period := 60.0 / float(bpm)
 	var x := 0.0
 	while x <= r.size.x:
-		var ph := fmod(_t - x / 70.0, period) / period
+		var ph := fposmod(_t - x / 70.0, period) / period
 		var y := 0.0
 		if ph < 0.06:
 			y = -10.0 * sin(ph / 0.06 * PI)

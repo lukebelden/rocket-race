@@ -287,10 +287,11 @@ func _draw_monitor(i: int, mon: Rect2, p: Dictionary, t: float, alpha: float) ->
 		_center_text("NO PILOT", scr.get_center(), 13, Color(Palette.TEXT_DIM, 0.5 * alpha))
 		return
 	var id := int(p["id"])
-	# Pixel feed (square, centred), scanlines on top.
-	var side := minf(scr.size.x, scr.size.y)
-	var feed := Rect2(scr.get_center() - Vector2(side, side) / 2.0, Vector2(side, side))
+	# Pixel feed of the whole pilot (fitted to the screen, centred), scanlines on top.
 	var tex := Pilots.pixel_texture(str(p.get("character", "")), 40)
+	var ts := tex.get_size()
+	var k := minf(scr.size.x / ts.x, scr.size.y / ts.y)
+	var feed := Rect2(scr.get_center() - ts * k / 2.0, ts * k)
 	var flick := 0.93 + 0.07 * sin(_t * 29.0 + i)
 	draw_texture_rect(tex, feed, false, Color(flick, flick, flick, alpha))
 	var y := scr.position.y
