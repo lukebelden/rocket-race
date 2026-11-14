@@ -165,7 +165,7 @@ func _on_packet(text: String) -> String:
 			var ids = msg.get("ids", [])
 			ready_changed.emit(ids if ids is Array else [])
 		"go":
-			race_go.emit(float(msg.get("countdown", 3)))
+			race_go.emit(float(msg.get("countdown", 5)))
 		"state":
 			rival_state.emit(int(msg.get("id", 0)), msg)
 		"crashed", "finished":

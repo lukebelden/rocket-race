@@ -25,14 +25,14 @@ const PORT = Number(process.env.PORT) || 8080;
 const STATIC_DIR = path.resolve(process.env.STATIC_DIR || path.join(__dirname, "..", "build", "web"));
 const MIN_PLAYERS = Math.max(1, Number(process.env.MIN_PLAYERS) || 2);
 const MAX_PLAYERS = 4;
-const COUNTDOWN_MS = 3000;
+const COUNTDOWN_MS = 5000;
 // Game's launch intro (game.gd INTRO_DURATION): the race clock starts after liftoff.
 const INTRO_MS = 3600;
 // Pre-race pilot intro: how long players get to press Ready before it's done for them.
 // After everyone's ready: time for the ready-up screen's exit (doors seal, engines light).
 const LAUNCH_MS = 1600;
 // Everyone ready: a short window to change your mind (Cancel Ready stops the launch).
-const LAUNCH_GRACE_MS = 3000;
+const LAUNCH_GRACE_MS = 5000;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I / O (look like 1 / 0)
 // Racer colours from the game palette (palette.gd): distinct but calm.
 const COLORS = ["#4fb8a8", "#f0893c", "#5aa9e6", "#9a73d6"];
