@@ -8,6 +8,10 @@ extends Control
 
 const Rocket := preload("res://scripts/game/rocket.gd")
 const Palette := preload("res://scripts/game/palette.gd")
+const Cosmetics := preload("res://scripts/game/cosmetics.gd")
+## Hangar workers wandering the deck (art: sprites/licensed/workers, see cosmetics.gd).
+const WORKERS := 3
+const WORKER_SPEED := 38.0  # px per second at the 648 px reference height
 
 var rocket: Area2D
 var _t := 0.0
@@ -15,6 +19,13 @@ var _ship_size := 1.0
 var _motes: Array[Vector3] = []
 ## Hangar screen: stand the rocket here (x in this control) instead of the usual spot. -1 = off.
 var _focus_x := -1.0
+## Decorations from the Hangar (catalog "decor" ids, in slot order).
+var _decor: Array = []
+## Decor and workers draw on this layer, in front of the rocket, sorted by depth.
+var _front: Node2D
+## Each worker: {sheet: which of the 16, pos (0-1 of the deck area), target, wait, dir, walk}.
+var _workers: Array = []
+var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
@@ -33,6 +44,16 @@ func _ready() -> void:
 	add_child(rocket)
 	rocket.set_process(false)  # a display model: it doesn't fly
 	rocket.set_process_unhandled_input(false)
+	_front = Node2D.new()
+	_front.draw.connect(_draw_front)
+	add_child(_front)  # after the rocket: drawn over it
+	_rng.randomize()
+	var picks: Array = range(Cosmetics.WORKER_COUNT)
+	picks.shuffle()
+	for i in WORKERS:
+		_workers.append({"sheet": picks[i], "pos": Vector2(_rng.randf(), _rng.randf()),
+			"target": Vector2(_rng.randf(), _rng.randf()), "wait": _rng.randf_range(0.0, 2.0),
+			"dir": 0, "walk": 0.0})
 	resized.connect(_layout)
 	show_loadout("sp")
 
@@ -45,9 +66,11 @@ func show_loadout(track: String) -> void:
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
 	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
+	rocket.finish = str(Profile.loadout(track).get("finish", "none"))
 	rocket.mods.assign(Profile.loadout(track)["mods"])
 	_ship_size = float(Profile.ship(track).get("size", 1.0))
 	rocket.ship = str(Profile.loadout(track)["ship"])
+	_decor = (Profile.loadout(track).get("decor", []) as Array).duplicate()
 	_layout()
 
 
@@ -67,8 +90,10 @@ func _portrait() -> bool:
 func _spot() -> Dictionary:
 	if _portrait():
 		return {"x": size.x * 0.5, "floor": size.y * 0.37, "scale": size.y / 1152.0 * 2.6 * _ship_size}
+	# In the Hangar screen the rocket stands a bit smaller, so its decorations fit in the
+	# middle column beside it.
 	return {"x": _focus_x if _focus_x >= 0.0 else size.x * 0.27, "floor": size.y * 0.82,
-		"scale": size.y / 648.0 * 3.6 * _ship_size}
+		"scale": size.y / 648.0 * 3.6 * _ship_size * (0.8 if _focus_x >= 0.0 else 1.0)}
 
 
 func _layout() -> void:
@@ -84,6 +109,111 @@ func _layout() -> void:
 func _process(delta: float) -> void:
 	_t += delta
 	queue_redraw()
+	_update_workers(delta)
+	_front.queue_redraw()
+
+
+# --- Decorations and workers on the deck --------------------------------------------------
+
+## Size unit: 1 at the 648 px reference height (decor and workers don't grow with the ship).
+func _unit() -> float:
+	return size.y / 1152.0 * 2.6 / 3.6 if _portrait() else size.y / 648.0
+
+
+## The deck strip in front of the platform where workers walk.
+func _deck() -> Rect2:
+	var spot := _spot()
+	var u := _unit()
+	var top := float(spot["floor"]) + 42.0 * u
+	var h := minf(46.0 * u, size.y - top - 12.0 * u)
+	if _focus_x >= 0.0:  # Hangar screen: stay in the open middle column
+		var half := size.x * 0.17
+		return Rect2(_focus_x - half, top, half * 2.0, h)
+	return Rect2(size.x * 0.05, top, size.x * 0.9, h)
+
+
+## Where each decor slot stands (bottom-centre) and its max height: beside the platform on
+## both sides, then in front of it, left and right of the rocket.
+func _decor_slots() -> Array:
+	var spot := _spot()
+	var cx: float = spot["x"]
+	var fy: float = spot["floor"]
+	var u := _unit()
+	var pw := 150.0 * float(spot["scale"]) / 3.6
+	var side := 40.0 if _focus_x >= 0.0 else 58.0  # tucked in closer in the Hangar screen
+	var side_h := 78.0 if _focus_x >= 0.0 else 92.0
+	return [
+		[Vector2(cx - pw - side * u, fy + 4.0 * u), side_h * u],
+		[Vector2(cx + pw + side * u, fy + 4.0 * u), side_h * u],
+		[Vector2(cx - pw * 0.78, fy + 40.0 * u), 70.0 * u],
+		[Vector2(cx + pw * 0.78, fy + 40.0 * u), 70.0 * u],
+	]
+
+
+func _update_workers(delta: float) -> void:
+	var deck := _deck()
+	if deck.size.x <= 0.0 or deck.size.y <= 0.0:
+		return
+	var speed := WORKER_SPEED * _unit()
+	for w in _workers:
+		if float(w["wait"]) > 0.0:
+			w["wait"] = float(w["wait"]) - delta
+			w["walk"] = 0.0
+			continue
+		var at: Vector2 = deck.position + (w["pos"] as Vector2) * deck.size
+		var goal: Vector2 = deck.position + (w["target"] as Vector2) * deck.size
+		var step := goal - at
+		if step.length() <= speed * delta:
+			# Arrived: stand around a bit (facing you), then pick somewhere new.
+			w["pos"] = w["target"]
+			w["dir"] = 0
+			w["wait"] = _rng.randf_range(1.5, 4.5)
+			w["target"] = Vector2(_rng.randf(), _rng.randf())
+			continue
+		at += step.normalized() * speed * delta
+		w["pos"] = (at - deck.position) / deck.size
+		w["dir"] = (1 if step.x < 0.0 else 2) if absf(step.x) > absf(step.y) else (0 if step.y > 0.0 else 3)
+		w["walk"] = float(w["walk"]) + delta
+
+
+## Decorations and workers, nearest (lowest on screen) drawn last.
+func _draw_front() -> void:
+	var u := _unit()
+	var items: Array = []  # [depth y, kind, data]
+	var slots := _decor_slots()
+	for i in mini(_decor.size(), slots.size()):
+		var tex := Cosmetics.decor(str(_decor[i]))
+		if tex:
+			items.append([(slots[i][0] as Vector2).y, "decor", [tex, slots[i][0], slots[i][1]]])
+	var sheet := Cosmetics.workers()
+	if sheet:
+		var deck := _deck()
+		for w in _workers:
+			var at: Vector2 = deck.position + (w["pos"] as Vector2) * deck.size
+			items.append([at.y, "worker", [w, at]])
+	items.sort_custom(func(a, b) -> bool: return a[0] < b[0])
+	for it in items:
+		if it[1] == "decor":
+			var tex: Texture2D = it[2][0]
+			var base: Vector2 = it[2][1]
+			var max_h: float = it[2][2]
+			var k := minf(max_h / tex.get_height(), max_h * 1.3 / tex.get_width())
+			var sz := Vector2(tex.get_width(), tex.get_height()) * k
+			_front.draw_set_transform(base + Vector2(0, -sz.y * 0.04), 0.0, Vector2(1, 0.3))
+			_front.draw_circle(Vector2.ZERO, sz.x * 0.45, Color(0, 0, 0, 0.25))  # contact shadow
+			_front.draw_set_transform(Vector2.ZERO)
+			_front.draw_texture_rect(tex, Rect2(base - Vector2(sz.x * 0.5, sz.y), sz), false)
+		else:
+			var w: Dictionary = it[2][0]
+			var at: Vector2 = it[2][1]
+			var walking := float(w["walk"]) > 0.0
+			var step: int = [0, 1, 2, 1][int(float(w["walk"]) * 7.0) % 4] if walking else 1
+			var src := Cosmetics.worker_region(int(w["sheet"]), int(w["dir"]), step)
+			var sz := src.size * 2.6 * u
+			_front.draw_set_transform(at, 0.0, Vector2(1, 0.3))
+			_front.draw_circle(Vector2.ZERO, sz.x * 0.42, Color(0, 0, 0, 0.3))
+			_front.draw_set_transform(Vector2.ZERO)
+			_front.draw_texture_rect_region(sheet, Rect2(at - Vector2(sz.x * 0.5, sz.y - 2.0 * u), sz), src)
 
 
 # --- Drawing helpers (all flat: one colour per shape) ---------------------------------------

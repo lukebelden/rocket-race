@@ -110,8 +110,8 @@ function serveStatic(req, res) {
 //   POST /api/logout
 //   GET  /api/me                                      -> {profile}
 //   POST /api/run     {score, level}                  -> {profile, reward}   single-player run
-//   POST /api/buy     {track: sp|mp, kind: ships|mods|designs, id}  -> {profile}
-//   POST /api/loadout {track: sp|mp, ship, design, mods}            -> {profile}
+//   POST /api/buy     {track: sp|mp, kind: ships|mods|designs|finishes|decor, id} -> {profile}
+//   POST /api/loadout {track: sp|mp, ship, design, mods, finish, decor} -> {profile}
 //   POST /api/character {character}                                 -> {profile}
 //   POST /api/account/password {current, password}  -> {token, profile}  (other devices signed out)
 //   POST /api/account/email    {password, email}     -> {profile}
@@ -443,7 +443,9 @@ function shipLook(profile) {
   const d = designs.find((x) => x.id === lo.design) || designs[0] || {};
   return {
     ship: lo.ship || "small",
-    paint: { main: d.main || "#e5683b", dark: d.dark || "#a8432a", body: d.body || "#e6efe9" },
+    // finish (hull material) rides along with the paint so rooms pass it on unchanged.
+    paint: { main: d.main || "#e5683b", dark: d.dark || "#a8432a", body: d.body || "#e6efe9",
+      finish: typeof lo.finish === "string" ? lo.finish : "none" },
     mods: Array.isArray(lo.mods) ? lo.mods.filter(Boolean).slice(0, 3) : [],
   };
 }

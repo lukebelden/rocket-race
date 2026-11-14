@@ -48,13 +48,35 @@ const INTRO_DURATION := 3.6
 ## One entry per level, in order. After the last one, levels continue as "Deep Space".
 const PLANETS := [
 	# Soft flat colours that sit in the palette (palette.gd); rocks are the planet's dust.
-	{"name": "The Moon", "color": Color("b7c3cf"), "rock": Color("6e7b93"), "style": "craters", "radius": 150.0},
-	{"name": "Mars", "color": Color("d9774a"), "rock": Color("8c4a37"), "style": "polar", "radius": 165.0},
-	{"name": "Jupiter", "color": Color("d6b088"), "rock": Color("8a7360"), "style": "bands", "radius": 250.0, "spot": Color("b9502c")},
-	{"name": "Saturn", "color": Color("e2cc92"), "rock": Color("8f8462"), "style": "rings", "radius": 190.0},
-	{"name": "Uranus", "color": Color("8fd6cf"), "rock": Color("4f8a88"), "style": "plain", "radius": 175.0},
-	{"name": "Neptune", "color": Color("4f74c9"), "rock": Color("46557f"), "style": "bands", "radius": 175.0, "spot": Color("262d52")},
+	# "tex": painted planet (Screaming Brain Studios, CC0: sprites/planets/LICENSE.txt). "color" still
+	# tints the halo and Saturn's rings.
+	{"name": "The Moon", "color": Color("b7c3cf"), "rock": Color("6e7b93"), "style": "craters", "radius": 150.0,
+		"tex": preload("res://sprites/planets/moon.png")},
+	{"name": "Mars", "color": Color("d9774a"), "rock": Color("8c4a37"), "style": "polar", "radius": 165.0,
+		"tex": preload("res://sprites/planets/mars.png")},
+	{"name": "Jupiter", "color": Color("d6b088"), "rock": Color("8a7360"), "style": "bands", "radius": 250.0,
+		"tex": preload("res://sprites/planets/jupiter.png")},
+	{"name": "Saturn", "color": Color("e2cc92"), "rock": Color("8f8462"), "style": "rings", "radius": 190.0,
+		"tex": preload("res://sprites/planets/saturn.png")},
+	{"name": "Uranus", "color": Color("8fd6cf"), "rock": Color("4f8a88"), "style": "plain", "radius": 175.0,
+		"tex": preload("res://sprites/planets/uranus.png")},
+	{"name": "Neptune", "color": Color("4f74c9"), "rock": Color("46557f"), "style": "bands", "radius": 175.0,
+		"tex": preload("res://sprites/planets/neptune.png")},
 ]
+## Past Neptune: endless "Deep Space" levels cycle through these strange worlds.
+const DEEP_PLANETS := [
+	{"color": Color("e0603a"), "rock": Color("6b2a22"), "style": "craters", "radius": 170.0, "tex": preload("res://sprites/planets/deep_magma.png")},
+	{"color": Color("9fd59a"), "rock": Color("4f7a55"), "style": "plain", "radius": 230.0, "tex": preload("res://sprites/planets/deep_green.png")},
+	{"color": Color("d9877a"), "rock": Color("7a4040"), "style": "rings", "radius": 200.0, "tex": preload("res://sprites/planets/deep_red.png")},
+	{"color": Color("6fc2b6"), "rock": Color("3b6f68"), "style": "polar", "radius": 165.0, "tex": preload("res://sprites/planets/deep_tropical.png")},
+	{"color": Color("b9d8f0"), "rock": Color("6a86a0"), "style": "plain", "radius": 180.0, "tex": preload("res://sprites/planets/deep_glacial.png")},
+	{"color": Color("d9a050"), "rock": Color("7a5530"), "style": "craters", "radius": 155.0, "tex": preload("res://sprites/planets/deep_cratered.png")},
+	{"color": Color("6fb8b0"), "rock": Color("3f6a66"), "style": "plain", "radius": 175.0, "tex": preload("res://sprites/planets/deep_aqua.png")},
+	{"color": Color("a8875e"), "rock": Color("5e4a35"), "style": "polar", "radius": 165.0, "tex": preload("res://sprites/planets/deep_muddy.png")},
+]
+## Earth's surface and atmosphere, drawn on the GPU (sharp at any size): see earth.gdshader.
+const EarthShader := preload("res://scripts/game/earth.gdshader")
+const MOON_TEX := preload("res://sprites/planets/moon.png")
 
 const STATION_SPEED := 110.0
 ## Hull repaired when docking at a station.
@@ -161,7 +183,20 @@ var clock: float = 0.0
 # Background: scrolling star/nebula layers and the current planet are separate nodes that
 # draw once and then just move (much cheaper than redrawing everything every frame).
 var bg_layers: Array = []
+## Space images behind the stars, one per planet level (cycling). Screaming Brain Studios, CC0:
+## see sprites/space/LICENSE.txt.
+const NEBULAE: Array[Texture2D] = [
+	preload("res://sprites/space/nebula_1.png"), preload("res://sprites/space/nebula_2.png"),
+	preload("res://sprites/space/nebula_3.png"), preload("res://sprites/space/nebula_4.png"),
+	preload("res://sprites/space/nebula_5.png"), preload("res://sprites/space/nebula_6.png"),
+	preload("res://sprites/space/nebula_7.png"), preload("res://sprites/space/nebula_8.png"),
+]
+const NEBULA_FADE := 4.0  # seconds to crossfade to the next level's image
+var _nebula_layers: Array = []  # [showing, fading in]
+var _nebula_index: int = 0
+var _nebula_tween: Tween
 var planet_node: Node2D
+var earth_globe: Sprite2D
 var _planet_level: int = 0
 ## Current forward flight speed: 1.0 normally, up to FORWARD_BOOST while boosting.
 var forward_speed: float = 1.0
@@ -778,11 +813,8 @@ func _space_amount() -> float:
 func _planet(lvl: int) -> Dictionary:
 	if lvl <= PLANETS.size():
 		return PLANETS[lvl - 1]
-	# Past Neptune: endless "Deep Space" levels with strange recoloured planets.
-	var base: Dictionary = PLANETS[(lvl - 1) % PLANETS.size()].duplicate()
-	var hue_shift := fmod(lvl * 0.37, 1.0)
-	var c: Color = base["color"]
-	base["color"] = Color.from_hsv(fmod(c.h + hue_shift, 1.0), clampf(c.s + 0.2, 0.0, 1.0), c.v)
+	# Past Neptune: endless "Deep Space" levels, each with a strange new world.
+	var base: Dictionary = DEEP_PLANETS[(lvl - PLANETS.size() - 1) % DEEP_PLANETS.size()].duplicate()
 	base["name"] = "Deep Space"
 	return base
 
@@ -1730,9 +1762,20 @@ func _make_background() -> void:
 	PlanetNode.glow_tex = glow_tex
 	PlanetNode.shade_tex = shade_tex
 	Obstacle.glow_tex = glow_tex
+	# Farthest: the space image for this level (two layers so a new one can fade in over the old).
+	for i in 2:
+		var img := StarLayer.new()
+		img.kind = StarLayer.Kind.IMAGE
+		img.speed = 6.0
+		img.texture = NEBULAE[0]
+		img.self_modulate.a = 1.0 if i == 0 else 0.0
+		img.show_behind_parent = true
+		add_child(img)
+		move_child(img, bg_layers.size())
+		bg_layers.append(img)
+		_nebula_layers.append(img)
 	# [kind, count, speed, dot size range, brightness range, twinkle rate]
 	var specs := [
-		[StarLayer.Kind.NEBULA, 4, 6.0, Vector2.ZERO, Vector2.ZERO, 0.0],
 		[StarLayer.Kind.STARS, 70, 22.0, Vector2(0.7, 1.1), Vector2(0.3, 0.55), 1.3],
 		[StarLayer.Kind.STARS, 45, 55.0, Vector2(1.0, 1.6), Vector2(0.5, 0.8), 2.1],
 		[StarLayer.Kind.STARS, 25, 110.0, Vector2(1.4, 2.1), Vector2(0.8, 1.0), 2.9],
@@ -1754,6 +1797,17 @@ func _make_background() -> void:
 	planet_node.visible = false
 	add_child(planet_node)
 	move_child(planet_node, bg_layers.size())
+	# Earth below the launch pad (a shader on a plain square; placed by _draw_earth).
+	var white := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	white.fill(Color.WHITE)
+	earth_globe = Sprite2D.new()
+	earth_globe.texture = ImageTexture.create_from_image(white)
+	earth_globe.material = ShaderMaterial.new()
+	(earth_globe.material as ShaderMaterial).shader = EarthShader
+	earth_globe.show_behind_parent = true  # behind the city and pad, which this node draws
+	earth_globe.visible = false
+	add_child(earth_globe)
+	move_child(earth_globe, planet_node.get_index() + 1)
 
 
 ## Renders 8 random asteroid shapes + the warning glow into one texture, once per session
@@ -1810,6 +1864,7 @@ func _update_background() -> void:
 	var boost := 1.0 + 6.0 * space if state == State.INTRO else forward_speed
 	for layer in bg_layers:
 		layer.speed_scale = boost
+	_update_nebula()
 
 	# The planet for the current level drifts slowly down past the rocket.
 	var show_planet := state == State.PLAYING or state == State.DOCKED or state == State.OVER
@@ -1824,6 +1879,33 @@ func _update_background() -> void:
 		var side := 0.2 if level % 2 == 1 else 0.8
 		planet_node.position = Vector2(size.x * side,
 			lerpf(-radius - 40.0, size.y + radius + 40.0, level_time / LEVEL_DURATION))
+
+
+## Each planet level has its own space image; a new level fades the next one in.
+func _update_nebula() -> void:
+	var want := (maxi(level, 1) - 1) % NEBULAE.size()
+	if want == _nebula_index:
+		return
+	_nebula_index = want
+	var old: Node2D = _nebula_layers[0]
+	var new: Node2D = _nebula_layers[1]
+	new.texture = NEBULAE[want]
+	new.position.y = old.position.y
+	_nebula_layers = [new, old]
+	if new.get_index() < old.get_index():
+		move_child(new, old.get_index())  # the incoming image draws on top of the old one
+	if _space_amount() <= 0.0:
+		new.self_modulate.a = 1.0  # not visible yet (on Earth): no need to fade
+		old.self_modulate.a = 0.0
+		return
+	# Fade the new one in over the old (both fading at once would show the sky through).
+	if _nebula_tween and _nebula_tween.is_valid():
+		_nebula_tween.kill()  # a level went by mid-fade: finish that one at once
+		old.self_modulate.a = 1.0
+	new.self_modulate.a = 0.0
+	_nebula_tween = create_tween()
+	_nebula_tween.tween_property(new, "self_modulate:a", 1.0, NEBULA_FADE)
+	_nebula_tween.tween_callback(func() -> void: old.self_modulate.a = 0.0)
 
 
 ## Asteroid breaks into tumbling chunks plus a flash where it hit.
@@ -2610,6 +2692,7 @@ func _apply_loadout() -> void:
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
 	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
+	rocket.finish = str(Profile.loadout(track).get("finish", "none"))
 	rocket.pilot = ""  # pilots sit at the HUD console now, not in the ship window
 	if player_card:
 		player_card.animal = Profile.character()
@@ -2986,9 +3069,12 @@ func _draw() -> void:
 	var size := get_viewport_rect().size
 	var space := _space_amount()
 
+	var earth_shown := false
 	if space < 1.0:
 		_draw_clouds(size, space)
-		_draw_earth(size)
+		earth_shown = _draw_earth(size)
+	if earth_globe and earth_globe.visible != earth_shown:
+		earth_globe.visible = earth_shown
 
 	for p in smoke:
 		var age := p.w / 2.0
@@ -3026,92 +3112,90 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO)
 
 
-func _draw_earth(size: Vector2) -> void:
+## Earth under the launch pad and on the climb. The planet and its glowing atmosphere are the
+## earth_globe shader (sharp at any size); this draws the moon, the city and the pad on top.
+## Returns whether the globe is on screen.
+func _draw_earth(size: Vector2) -> bool:
 	var offset := _ground_offset()
 	var rise := _intro_rise()
 	# Seen from the pad, Earth is a huge gentle curve; climbing, it shrinks into a ball.
-	var radius := lerpf(size.x * 2.2, size.x * 0.5, smoothstep(0.0, 0.8, rise))
+	var radius := lerpf(size.x * 2.2, size.x * 0.45, smoothstep(0.0, 0.75, rise))
 	# Ground surface sits just under the rocket's fins.
 	var top: float = size.y - rocket.bottom_gap + 33.0 + offset
 	var center := Vector2(size.x / 2.0, top + radius)
-	var spread := minf(1.0, size.x * 0.9 / radius)  # keeps features on screen at any size
+	# Night sky: the Moon, softly glowing (drifts down a little as you climb). It's gone before
+	# the sky is, so it doesn't leave a dark ghost over the stars.
+	var moon_fade := 1.0 - smoothstep(0.0, 0.45, _space_amount())
+	if moon_fade > 0.0:
+		var moon := Vector2(size.x * 0.76, size.y * 0.24 + offset * 0.35)
+		var moon_r := minf(size.x, size.y) * 0.075
+		Palette.glow(self, moon, moon_r * 3.2, Palette.MIST, 1.1 * moon_fade)
+		var moon_half := moon_r / PlanetNode.DISC
+		draw_set_transform(moon, 0.0, Vector2(-1, 1))  # mirrored: lit from the top-left like the rest
+		draw_texture_rect(MOON_TEX, Rect2(-moon_half, -moon_half, moon_half * 2.0, moon_half * 2.0), false,
+			Color(1.25, 1.25, 1.3, moon_fade))
+		draw_set_transform(Vector2.ZERO)
 
-	# Night sky: a big soft moon (drifts down a little as you climb).
-	var moon := Vector2(size.x * 0.76, size.y * 0.24 + offset * 0.35)
-	var moon_r := minf(size.x, size.y) * 0.075
-	var sky_fade := 1.0 - _space_amount()
-	Palette.glow(self, moon, moon_r * 3.0, Palette.MIST, 1.3 * sky_fade)
-	draw_circle(moon, moon_r, Color(Palette.MIST, 0.95 * sky_fade))
-	if top - 40.0 > size.y:
-		return
+	# Once the city has gone, Earth becomes a whole globe dropping away below you, then slides
+	# out of view just before the level starts.
+	var ball := smoothstep(0.5, 0.85, rise)
+	var g_radius := radius
+	var g_center := center
+	if ball > 0.0:
+		var ball_r := lerpf(size.x * 0.4, size.x * 0.26, smoothstep(0.55, 1.0, rise))
+		var ball_c := Vector2(size.x / 2.0, size.y + ball_r * 0.3 + size.y * 1.1 * smoothstep(0.78, 1.0, rise))
+		g_radius = lerpf(radius, ball_r, ball)
+		g_center = center.lerp(ball_c, ball)
+	# Atmosphere: thick glowing sky over the horizon on the pad, a thin bright rim from orbit.
+	var atmo_px := lerpf(size.y * 0.5, size.y * 0.07, smoothstep(0.0, 0.7, rise))
+	var extent := 1.0 + atmo_px / g_radius
+	if g_center.y - g_radius - atmo_px > size.y:
+		return false
+	earth_globe.position = g_center
+	earth_globe.scale = Vector2.ONE * g_radius * extent * 2.0
+	var mat := earth_globe.material as ShaderMaterial
+	mat.set_shader_parameter("extent", extent)
+	mat.set_shader_parameter("radius_px", g_radius)
+	mat.set_shader_parameter("light", lerpf(0.55, 1.0, smoothstep(0.2, 0.8, rise)))  # moonlight -> sunlight
+	mat.set_shader_parameter("spin", 2.4 + rise * 0.5)
+	mat.set_shader_parameter("limb", lerpf(0.12, 0.75, smoothstep(0.1, 0.7, rise)))
 
 	# Night city around the launch site, standing on Earth's curve: fades out as you climb.
 	var land_fade := 1.0 - smoothstep(0.25, 0.6, rise)
 	if land_fade > 0.0:
 		_draw_landscape(size, center, radius, land_fade)
 
-	# Atmosphere: flat haze rings.
-	for i in 3:
-		draw_colored_polygon(_circle_points(center, radius + 36.0 - i * 11.0), Color(Palette.MIST, 0.06 + 0.05 * i))
-	# Night oceans: teal, deeper towards the far side.
-	draw_colored_polygon(_circle_points(center, radius), Color("2c6d6f"))
-	draw_colored_polygon(_circle_points(center + Vector2(radius * 0.06, radius * 0.06), radius * 0.94), Color("1d4249"))
-
-	# Continents: flat shapes in a few muted tones (land, lighter land, sand, snowy peaks).
-	# [angle along the surface, size, shape seed, has desert, has mountains]
-	var lands := [[-0.5, 1.0, 1.3, false, true], [-0.22, 1.35, 4.1, true, false], [0.08, 0.85, 2.2, false, false],
-		[0.33, 1.25, 7.7, true, true], [0.58, 0.8, 5.5, false, false], [-0.72, 0.6, 9.1, false, false]]
-	var land_size := minf(radius * 0.15, size.x * 0.085)
-	var land := Color("3f8a74")
-	for spec in lands:
-		var angle: float = -PI / 2.0 + float(spec[0]) * spread
-		var blob: float = land_size * float(spec[1])
-		var pos: Vector2 = center + Vector2.from_angle(angle) * (radius - blob * 0.95)
-		var seed: float = spec[2]
-		draw_colored_polygon(_blob(pos, blob, seed), land)
-		draw_colored_polygon(_blob(pos + Vector2(-blob * 0.2, -blob * 0.15), blob * 0.55, seed + 1.0), land.lightened(0.12))
-		if spec[3]:
-			draw_colored_polygon(_blob(pos + Vector2(blob * 0.3, blob * 0.1), blob * 0.38, seed + 2.0), Color("c9a46a"))
-		if spec[4]:
-			for k in 3:
-				var m := pos + Vector2((k - 1) * blob * 0.22, -blob * 0.05 + absf(k - 1) * blob * 0.08)
-				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.14, blob * 0.1), m + Vector2(0, -blob * 0.16),
-					m + Vector2(blob * 0.14, blob * 0.1)]), Palette.SLATE)
-				draw_colored_polygon(PackedVector2Array([m + Vector2(-blob * 0.05, -blob * 0.1), m + Vector2(0, -blob * 0.16),
-					m + Vector2(blob * 0.05, -blob * 0.1)]), Palette.MIST)
-	if rise > 0.5:  # polar ice cap, once Earth is a ball below you
-		var cap := center + Vector2(0, -radius * 0.9)
-		draw_colored_polygon(_blob(cap, radius * 0.16, 3.3), Color(Palette.MIST, smoothstep(0.5, 0.8, rise)))
-	for i in 7:  # moonlit cloud swirls
-		var a := -PI / 2.0 + (i - 3) * 0.17 * spread + 0.05
-		var p := center + Vector2.from_angle(a) * (radius - land_size * (0.4 + 0.35 * (i % 3)))
-		draw_colored_polygon(_blob(p, land_size * (0.35 + 0.1 * (i % 2)), 11.0 + i), Color(Palette.MIST, 0.3))
-
 	# Launch complex: dark pad with an amber stripe, flat tower, floodlights and a bunker.
+	# Fades out with the city, before Earth becomes a globe (it would float over it).
+	var pa := 1.0 - smoothstep(0.42, 0.56, rise)
+	if pa <= 0.0:
+		return true
+	var f := func(c: Color) -> Color: return Color(c, c.a * pa)
 	var pad_x := size.x / 2.0
-	draw_rect(Rect2(pad_x - 120.0, top - 4.0, 240.0, 8.0), Palette.INK)  # apron
-	draw_rect(Rect2(pad_x - 64.0, top - 10.0, 128.0, 12.0), Palette.SLATE)
-	draw_rect(Rect2(pad_x - 54.0, top - 10.0, 108.0, 3.0), Color(Palette.AMBER, 0.85))
+	draw_rect(Rect2(pad_x - 120.0, top - 4.0, 240.0, 8.0), f.call(Palette.INK))  # apron
+	draw_rect(Rect2(pad_x - 64.0, top - 10.0, 128.0, 12.0), f.call(Palette.SLATE))
+	draw_rect(Rect2(pad_x - 54.0, top - 10.0, 108.0, 3.0), f.call(Color(Palette.AMBER, 0.85)))
 	for s in [-1.0, 1.0]:  # blast deflector walls
 		draw_colored_polygon(PackedVector2Array([Vector2(pad_x + s * 64.0, top - 10), Vector2(pad_x + s * 84, top - 2),
-			Vector2(pad_x + s * 84, top + 2), Vector2(pad_x + s * 64, top + 2)]), Palette.INDIGO)
-	draw_rect(Rect2(pad_x + 38.0, top - 96.0, 5.0, 86.0), Palette.INDIGO)
-	draw_rect(Rect2(pad_x + 50.0, top - 96.0, 5.0, 86.0), Palette.INDIGO)
+			Vector2(pad_x + s * 84, top + 2), Vector2(pad_x + s * 64, top + 2)]), f.call(Palette.INDIGO))
+	draw_rect(Rect2(pad_x + 38.0, top - 96.0, 5.0, 86.0), f.call(Palette.INDIGO))
+	draw_rect(Rect2(pad_x + 50.0, top - 96.0, 5.0, 86.0), f.call(Palette.INDIGO))
 	for i in 6:
-		draw_rect(Rect2(pad_x + 43.0, top - 92.0 + i * 14.0, 7.0, 3.0), Palette.INDIGO)
-	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 34.0, 5.0), Palette.INDIGO)  # service arm
+		draw_rect(Rect2(pad_x + 43.0, top - 92.0 + i * 14.0, 7.0, 3.0), f.call(Palette.INDIGO))
+	draw_rect(Rect2(pad_x + 20.0, top - 86.0, 34.0, 5.0), f.call(Palette.INDIGO))  # service arm
 	var blink := fmod(clock, 1.2) < 0.6
 	if blink:
-		Palette.glow(self, Vector2(pad_x + 46.0, top - 101.0), 12.0, Palette.ORANGE)
-	draw_circle(Vector2(pad_x + 46.0, top - 101.0), 3.0, Palette.ORANGE if blink else Palette.RUST.darkened(0.4))
+		Palette.glow(self, Vector2(pad_x + 46.0, top - 101.0), 12.0, Palette.ORANGE, pa)
+	draw_circle(Vector2(pad_x + 46.0, top - 101.0), 3.0, f.call(Palette.ORANGE if blink else Palette.RUST.darkened(0.4)))
 	for s in [-1.0, 1.0]:  # floodlight masts with warm lamps
 		var lx: float = pad_x + s * 105.0
-		draw_rect(Rect2(lx - 1, top - 44, 3, 40), Palette.INDIGO)
-		Palette.glow(self, Vector2(lx, top - 46), 22.0, Palette.AMBER)
-		draw_rect(Rect2(lx - 6, top - 49, 12, 5), Palette.AMBER)
-	draw_rect(Rect2(pad_x - 150.0, top - 18.0, 28.0, 14.0), Palette.INDIGO)  # control bunker
-	draw_rect(Rect2(pad_x - 146.0, top - 14.0, 6.0, 4.0), Palette.AMBER)
-	draw_rect(Rect2(pad_x - 136.0, top - 14.0, 6.0, 4.0), Palette.AMBER)
+		draw_rect(Rect2(lx - 1, top - 44, 3, 40), f.call(Palette.INDIGO))
+		Palette.glow(self, Vector2(lx, top - 46), 22.0, Palette.AMBER, pa)
+		draw_rect(Rect2(lx - 6, top - 49, 12, 5), f.call(Palette.AMBER))
+	draw_rect(Rect2(pad_x - 150.0, top - 18.0, 28.0, 14.0), f.call(Palette.INDIGO))  # control bunker
+	draw_rect(Rect2(pad_x - 146.0, top - 14.0, 6.0, 4.0), f.call(Palette.AMBER))
+	draw_rect(Rect2(pad_x - 136.0, top - 14.0, 6.0, 4.0), f.call(Palette.AMBER))
+	return true
 
 
 ## Night city on the curve of the Earth: misty far skyline, then domed towers and blocks
@@ -3166,15 +3250,27 @@ func _draw_landscape(size: Vector2, center: Vector2, radius: float, fade: float)
 			wy += 12.0
 			row += 1
 
-	# Near ground: dark band along the curve.
+	# Near ground: dark night countryside down to the bottom of the screen (it fades as you
+	# climb, uncovering the Earth globe), dotted with the lights of distant towns.
 	var near := PackedVector2Array()
 	x = -12.0
 	while x <= size.x + 12.0:
 		near.append(Vector2(x, ground.call(x) - 6.0 - 4.0 * sin(x * 0.03)))
 		x += 12.0
-	near.append(Vector2(size.x + 12.0, ground.call(size.x + 12.0) + 6.0))
-	near.append(Vector2(-12.0, ground.call(-12.0) + 6.0))
-	draw_colored_polygon(near, Color(Palette.INK, fade))
+	# Close the shape below both the screen and the curve's ends (they sink as you climb).
+	var floor_y := maxf(size.y, maxf(ground.call(-12.0), ground.call(size.x + 12.0))) + 20.0
+	near.append(Vector2(size.x + 12.0, floor_y))
+	near.append(Vector2(-12.0, floor_y))
+	draw_colored_polygon(near, Color(Color("101c24"), fade))
+	for k in 70:
+		var lx := fmod(k * 137.5 + 31.0, size.x + 40.0) - 20.0
+		var depth := fmod(k * 0.618, 1.0)  # 0 = far (just under the skyline), 1 = near
+		var ly: float = ground.call(lx) + 10.0 + depth * depth * (size.y - ground.call(lx))
+		if absf(lx - base) < 150.0 and depth < 0.3:
+			continue  # keep the pad clear
+		var lr := 0.8 + depth * 1.4
+		Palette.glow(self, Vector2(lx, ly), lr * 4.0, Palette.AMBER, 0.5 * fade)
+		draw_circle(Vector2(lx, ly), lr, Color(Palette.AMBER, 0.85 * fade))
 
 
 ## Wobbly round shape (continents, clouds on Earth). Same seed = same shape every frame.
@@ -3214,18 +3310,26 @@ func _draw_clouds(size: Vector2, space: float) -> void:
 	if _clouds.is_empty() or absf(float(_clouds[0]["y"]) - (size.y - 230.0)) > 1.0:
 		_make_clouds(size)
 	var offset := _cloud_scroll()
-	var fade := (1.0 - space) * 0.88
+	var fade := (1.0 - smoothstep(0.0, 0.5, space)) * 0.9  # gone well before space (no ghosts over the stars)
+	# Soft moonlit clouds: each puff is a feathered glow - a dark underside, a pale body and a
+	# bright moonlit top - so they look like vapour rather than flat circles.
 	for cloud in _clouds:
 		var cy: float = cloud["y"] + offset
-		if cy < -120.0 or cy > size.y + 120.0:
+		if cy < -160.0 or cy > size.y + 160.0:
 			continue
 		var cx: float = cloud["x"]
 		var sc: float = cloud["scale"]
 		var a: float = fade * float(cloud["alpha"])
-		for p in cloud["puffs"]:  # soft grey underside first, then the white tops
-			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc + 6.0 * sc), p.z * sc, Color(Color("3e5f74"), a * 0.85))
-		for p in cloud["puffs"]:
-			draw_circle(Vector2(cx + p.x * sc, cy + p.y * sc), p.z * sc * 0.92, Color(Color("6f9fa8"), a))
+		for pass_spec in [[Vector2(0, 9), 1.9, Color("2b4659"), 0.8], [Vector2.ZERO, 1.7, Color("7fa6b4"), 0.75],
+				[Vector2(-4, -7), 1.05, Color("c9e0e6"), 0.55]]:
+			var shift: Vector2 = pass_spec[0] * sc
+			var grow: float = pass_spec[1]
+			var tint: Color = pass_spec[2]
+			tint.a = a * float(pass_spec[3])
+			for p in cloud["puffs"]:
+				var r: float = p.z * sc * grow
+				var at := Vector2(cx + p.x * sc, cy + p.y * sc) + shift
+				draw_texture_rect(glow_tex, Rect2(at - Vector2(r, r), Vector2(r, r) * 2.0), false, tint)
 
 
 ## Soft round glow (nebulae, planet halos) and sphere shading, made once at startup.

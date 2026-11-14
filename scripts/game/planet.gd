@@ -7,6 +7,8 @@ const Palette := preload("res://scripts/game/palette.gd")
 ## Shared textures, made once by game.gd.
 static var glow_tex: Texture2D
 static var shade_tex: Texture2D
+## Painted planets: the round body spans this fraction of the image (243 of 256 px).
+const DISC := 0.95
 
 var data: Dictionary = {}:
 	set(value):
@@ -21,12 +23,29 @@ func _draw() -> void:
 	var color: Color = data["color"]
 	var style: String = data["style"]
 
-	# Flat soft halo around the gas and ice giants (thin atmosphere).
+	# Soft halo around the gas and ice giants (thin atmosphere): smooth for painted planets,
+	# flat stepped rings for the drawn ones.
 	if style != "craters" and style != "polar":
-		Palette.glow(self, Vector2.ZERO, r * 1.35, color.lightened(0.15), 1.4)
+		if data.has("tex") and glow_tex:
+			var h := r * 1.3
+			draw_texture_rect(glow_tex, Rect2(-h, -h, h * 2.0, h * 2.0), false, Color(color.lightened(0.15), 0.35))
+		else:
+			Palette.glow(self, Vector2.ZERO, r * 1.35, color.lightened(0.15), 1.4)
 
 	if style == "rings":
 		_draw_ring(r, color, true)
+
+	# Painted planet (sprites/planets): the disc fills DISC of the image, which is lit from the
+	# top-right, so it's mirrored to match the game's top-left light.
+	var tex: Texture2D = data.get("tex")
+	if tex:
+		var half := r / DISC
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1, 1))
+		draw_texture_rect(tex, Rect2(-half, -half, half * 2.0, half * 2.0), false)
+		draw_set_transform(Vector2.ZERO)
+		if style == "rings":
+			_draw_ring(r, color, false)
+		return
 
 	# Flat two-tone sphere: the whole disc in shadow, then the lit face (offset towards the
 	# light at the top-left), leaving a darker crescent on the far side.

@@ -192,7 +192,7 @@ function renderTicket(t) {
 // --- Players: search, view and edit accounts ----------------------------------------------
 
 const MODES = [["sp", "Single Player"], ["mp", "Multiplayer"]];
-const KIND_NAMES = { ships: "Ships", mods: "Mods", designs: "Paint" };
+const KIND_NAMES = { ships: "Ships", mods: "Mods", designs: "Paint", finishes: "Finishes", decor: "Hangar Decor" };
 let currentPlayer = "";
 
 function showView(name) {
@@ -281,7 +281,7 @@ function renderPlayer(p, message = "", isError = false) {
       el("span", { text: label }),
       el("div", { class: "items" }, ...p.catalog[kind].map((id) => {
         const owned = t.owned[kind].includes(id);
-        const starter = id === "small" || id === "classic";
+        const starter = id === "small" || id === "classic" || (kind === "finishes" && id === "none");
         return el("button", {
           class: "item", "aria-pressed": String(owned), text: id,
           title: starter ? "Starter item" : (owned ? "Click to remove" : "Click to unlock"),

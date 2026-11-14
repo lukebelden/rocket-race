@@ -18,11 +18,16 @@ const byId = (list) => Object.fromEntries(list.map((x) => [x.id, x]));
 const SHIPS = byId(catalog.ships);
 const MODS = byId(catalog.mods);
 const DESIGNS = byId(catalog.designs);
+// Hull finishes (material over the paint) and hangar decorations (props around your rocket).
+const FINISHES = byId(catalog.finishes || []);
+const DECOR = byId(catalog.decor || []);
+const DECOR_SLOTS = catalog.decor_slots || 4;
 const CHARACTERS = byId(catalog.characters);
 // Profiles from before the crew change had animal pilots: give them a new pilot.
 const OLD_CHARACTERS = { duck: "falcon", mouse: "echo", dog: "torque", cat: "scarlet", bear: "grizzly", raccoon: "viper", monkey: "rivet", penguin: "titan" };
 const DEFAULT_CHARACTER = "falcon";
-const TABLES = { ships: SHIPS, mods: MODS, designs: DESIGNS };
+const TABLES = { ships: SHIPS, mods: MODS, designs: DESIGNS, finishes: FINISHES, decor: DECOR };
+const KINDS = Object.keys(TABLES);
 
 /** XP needed to go from `level` to the next one. */
 function xpToNext(level) {
@@ -44,8 +49,8 @@ function newTrack() {
   return {
     xp: 0,
     credits: 0,
-    owned: { ships: ["small"], mods: [], designs: ["classic"] },
-    loadout: { ship: "small", design: "classic", mods: [] },
+    owned: { ships: ["small"], mods: [], designs: ["classic"], finishes: ["none"], decor: [] },
+    loadout: { ship: "small", design: "classic", mods: [], finish: "none", decor: [] },
   };
 }
 
@@ -69,7 +74,7 @@ function cleanTrack(input, checkLevels = false) {
   t.credits = int(input.credits, 1e9);
   const lvl = levelInfo(t.xp).level;
   const owned = input.owned || {};
-  for (const kind of ["ships", "mods", "designs"]) {
+  for (const kind of KINDS) {
     const out = new Set(t.owned[kind]);
     for (const id of Array.isArray(owned[kind]) ? owned[kind] : []) {
       if (TABLES[kind][id] && (!checkLevels || TABLES[kind][id].level <= lvl)) out.add(id);
@@ -120,7 +125,18 @@ function cleanLoadout(track, want) {
   for (const id of Array.isArray(want.mods) ? want.mods : []) {
     if (owned.mods.includes(id) && !mods.includes(id) && mods.length < SHIPS[ship].slots) mods.push(id);
   }
-  return { ship, design: owned.designs.includes(want.design) ? want.design : "classic", mods };
+  // Hangar decorations: owned, no repeats, up to DECOR_SLOTS (order = where they stand).
+  const decor = [];
+  for (const id of Array.isArray(want.decor) ? want.decor : []) {
+    if (owned.decor.includes(id) && !decor.includes(id) && decor.length < DECOR_SLOTS) decor.push(id);
+  }
+  return {
+    ship,
+    design: owned.designs.includes(want.design) ? want.design : "classic",
+    mods,
+    finish: owned.finishes.includes(want.finish) ? want.finish : "none",
+    decor,
+  };
 }
 
 /** Add XP + credits to one track; level-ups pay a bonus. Returns a summary. */
@@ -163,7 +179,7 @@ function raceReward(p, { score, levelReached, rank, finished, racers }) {
   return grant(p, "mp", xp, credits);
 }
 
-/** Buy a ship / mod / design in one mode's shop. Returns an error message, or "" on success. */
+/** Buy a ship / mod / design / finish / decoration in one mode's shop. Returns an error message, or "" on success. */
 function buy(p, track, kind, id) {
   if (!TRACKS.includes(track)) return "Unknown shop.";
   const item = TABLES[kind] && TABLES[kind][id];

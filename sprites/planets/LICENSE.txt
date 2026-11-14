@@ -1,0 +1,27 @@
+Planets: Screaming Brain Studios, "Large Planets 512x512" pack (renamed).
+moon=Lunar_04 mars=Barren_01 jupiter=OrgangeGiant_01 saturn=YellowGiant_01 uranus=BlueGiant_01
+neptune=Ocean_03 deep_magma=Magma_02 deep_green=GreenGiant_01 deep_red=RedGiant_01
+deep_tropical=Tropical_01 deep_glacial=Glacial_01 deep_cratered=Cratered_03 deep_aqua=Aquamarine_01 deep_muddy=Muddy_01
+The pack has no licence file of its own; it's from the same studio as the nebula pack, whose
+licence covers all Screaming Brain Studios assets:
+
+All Screaming Brain Studios assets have been released 
+under the CC0/Public Domain License. You are free to 
+use these assets in any and all projects, commercial 
+or non-commercial, with no restrictions, and can be 
+released with or without credit.
+
+--------------------------------------------------
+CC0 1.0 Universal (CC0 1.0) 
+Public Domain
+https://creativecommons.org/publicdomain/zero/1.0/
+--------------------------------------------------
+
+
+|| A Very Special Thanks to all my Patrons ||
+
+Dwayne Jarvis
+Peardox
+Caleb Ralph
+Heruca
+David Williams

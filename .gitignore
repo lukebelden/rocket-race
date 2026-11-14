@@ -11,3 +11,6 @@ server/node_modules/
 # Design preview screenshots
 design-preview/
 __pycache__/
+
+# Licensed third-party art: shipped only inside the exported build (see sprites/licensed/LICENSES.txt)
+sprites/licensed/

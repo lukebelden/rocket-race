@@ -39,6 +39,7 @@ func add_rival(id: int, rival_name: String, color: Color, ship := "small", paint
 	r.paint_main = Color.html(str(paint.get("main", "#e5683b")))
 	r.paint_dark = Color.html(str(paint.get("dark", "#a8432a")))
 	r.paint_body = Color.html(str(paint.get("body", "#e6efe9")))
+	r.finish = str(paint.get("finish", "none"))
 	for m in mods:
 		r.mods.append(str(m))
 	r.missile_count = 2

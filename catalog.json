@@ -50,5 +50,29 @@
     { "id": "violet", "name": "Violet", "level": 7, "price": 700, "main": "#9a73d6", "dark": "#62479a", "body": "#ece6f5" },
     { "id": "midnight", "name": "Midnight", "level": 10, "price": 1000, "main": "#4a5578", "dark": "#262d52", "body": "#a8b6c9" },
     { "id": "gold", "name": "Gold Rush", "level": 20, "price": 2500, "main": "#ffc56b", "dark": "#c88a2e", "body": "#262d52" }
+  ],
+  "_finishes_note": "Hull finish: a material texture laid over the paint (art in sprites/licensed/finishes, git-ignored). strength = how much it shows; scale = tile size on the hull.",
+  "finishes": [
+    { "id": "none", "name": "Smooth", "level": 1, "price": 0, "desc": "Factory-smooth hull." },
+    { "id": "riveted", "name": "Riveted Panels", "level": 2, "price": 250, "strength": 0.55, "scale": 1.0, "desc": "Bolted steel plates." },
+    { "id": "grating", "name": "Grating", "level": 4, "price": 400, "strength": 0.5, "scale": 0.6, "desc": "Square mesh grille." },
+    { "id": "hazard", "name": "Hazard Stripes", "level": 6, "price": 600, "strength": 0.8, "scale": 1.0, "desc": "Yellow and black warning lanes." },
+    { "id": "diamond", "name": "Diamond Plate", "level": 8, "price": 800, "strength": 0.6, "scale": 1.6, "desc": "Non-slip tread plate." },
+    { "id": "corrugated", "name": "Corrugated", "level": 12, "price": 1200, "strength": 0.6, "scale": 1.6, "desc": "Ribbed sheet metal." },
+    { "id": "oil", "name": "Grease Monkey", "level": 15, "price": 1500, "strength": 0.55, "scale": 1.2, "desc": "Well-loved, oil-stained plating." }
+  ],
+  "_decor_note": "Hangar decorations: props placed around your rocket in the hangar (art in sprites/licensed/decor, git-ignored). decor_slots = how many you can place.",
+  "decor_slots": 4,
+  "decor": [
+    { "id": "cones", "name": "Safety Cones", "level": 2, "price": 100 },
+    { "id": "crates", "name": "Crate Stack", "level": 2, "price": 150 },
+    { "id": "barrels", "name": "Oil Drums", "level": 3, "price": 200 },
+    { "id": "trolley", "name": "Tool Trolley", "level": 4, "price": 250 },
+    { "id": "gas", "name": "Gas Cylinders", "level": 5, "price": 300 },
+    { "id": "generator", "name": "Generator", "level": 7, "price": 500 },
+    { "id": "workbench", "name": "Workbench", "level": 9, "price": 700 },
+    { "id": "floodlight", "name": "Floodlight", "level": 11, "price": 800 },
+    { "id": "forklift", "name": "Forklift", "level": 14, "price": 1200 },
+    { "id": "robot_arm", "name": "Robot Arm", "level": 18, "price": 2000 }
   ]
 }

@@ -41,6 +41,9 @@ var missile_count: int = 0
 var _time: float = 0.0
 
 const ModInfo := preload("res://scripts/game/mods.gd")
+const Cosmetics := preload("res://scripts/game/cosmetics.gd")
+## Hull finish tile size, in rocket-sprite pixels.
+const FINISH_TILE := 70.0
 const Palette := preload("res://scripts/game/palette.gd")
 
 ## Ship sprites (built by art/build_rockets.gd from art/source/rocket_sheet.png).
@@ -81,6 +84,12 @@ shader_type canvas_item;
 uniform float hue_shift = 0.0;
 uniform float sat_mul = 1.0;
 uniform float val_mul = 1.0;
+// Hull finish (a material texture overlaid on the hull, tiled across it); strength 0 = none.
+uniform sampler2D finish_tex : filter_linear_mipmap, repeat_enable;
+uniform float finish_strength = 0.0;
+uniform vec2 finish_repeat = vec2(1.0);  // tiles across one animation frame
+uniform float frames = 6.0;  // the sheet's animation frames (pattern stays put between frames)
+uniform float finish_avg = 0.5;  // the material's average brightness
 vec3 rgb2hsv(vec3 c) {
 	vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
 	vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -98,7 +107,20 @@ void fragment() {
 	float hue_dist = min(hsv.x, 1.0 - hsv.x);  // distance from pure red
 	float is_red = (1.0 - smoothstep(0.035, 0.05, hue_dist)) * smoothstep(0.3, 0.42, hsv.y);
 	vec3 painted = hsv2rgb(vec3(fract(hsv.x + hue_shift), clamp(hsv.y * sat_mul, 0.0, 1.0), clamp(hsv.z * val_mul, 0.0, 1.0)));
-	COLOR = vec4(mix(col.rgb, painted, is_red), col.a);
+	vec3 rgb = mix(col.rgb, painted, is_red);
+	if (finish_strength > 0.0) {
+		// Multiply by the material divided by its average brightness: the hull keeps its
+		// shading, picks up the pattern's light and dark (and colour, e.g. hazard yellow) even
+		// on the white body. Very dark parts (outlines, window, nozzles) are left alone.
+		vec2 fuv = vec2(fract(UV.x * frames), UV.y);
+		// Gradients from the unwrapped UV, so there's no mip seam where fract() wraps.
+		vec2 per_sheet = finish_repeat * vec2(frames, 1.0);
+		vec3 t = textureGrad(finish_tex, fuv * finish_repeat, dFdx(UV * per_sheet), dFdy(UV * per_sheet)).rgb;
+		vec3 tinted = clamp(rgb * (t / max(finish_avg, 0.05)), 0.0, 1.0);
+		float hull = smoothstep(0.12, 0.3, max(rgb.r, max(rgb.g, rgb.b)));
+		rgb = mix(rgb, tinted, finish_strength * hull);
+	}
+	COLOR = vec4(rgb, col.a);
 }
 """
 static var _shader: Shader
@@ -111,6 +133,11 @@ var _anim: float = 0.0
 var paint_main := Color("e5683b")
 var paint_dark := Color("a8432a")
 var paint_body := Color("e6efe9")
+## Hull finish id from the catalog ("none" = smooth). See cosmetics.gd for the art.
+var finish: String = "none":
+	set(value):
+		finish = value
+		queue_redraw()
 var pilot: String = ""
 
 ## Screen x position of the finger steering the rocket, or NAN when not touching.
@@ -364,6 +391,16 @@ func _sync_sprites() -> void:
 	mat.set_shader_parameter("hue_shift", paint_main.h - base.h)
 	mat.set_shader_parameter("sat_mul", paint_main.s / base.s)
 	mat.set_shader_parameter("val_mul", paint_main.v / base.v)
+	# Hull finish: tiled about every FINISH_TILE sprite pixels (times the catalog's scale).
+	var ftex := Cosmetics.finish(finish)
+	var fitem := Profile.item("finishes", finish)
+	mat.set_shader_parameter("finish_strength", float(fitem.get("strength", 0.0)) if ftex else 0.0)
+	if ftex:
+		mat.set_shader_parameter("finish_tex", ftex)
+		var tile := FINISH_TILE * float(fitem.get("scale", 1.0))
+		mat.set_shader_parameter("finish_repeat", Vector2(fw, tex.get_height()) / tile)
+		mat.set_shader_parameter("frames", float(FRAMES))
+		mat.set_shader_parameter("finish_avg", Cosmetics.average_brightness(ftex))
 	# Engine flame: flickers, bigger while boosting and with the Bigger Thruster mod.
 	_flame.visible = flame_on
 	_flame.frame = frame

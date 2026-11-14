@@ -537,6 +537,8 @@ function getPlayer(name) {
   view_.history = db.prepare("SELECT created_at, admin, action FROM admin_log WHERE target = ? ORDER BY id DESC LIMIT 30").all(u.username);
   view_.catalog = { ships: progress.catalog.ships.map((s) => s.id), mods: progress.catalog.mods.map((m) => m.id),
     designs: progress.catalog.designs.map((d) => d.id),
+    finishes: (progress.catalog.finishes || []).map((f) => f.id),
+    decor: (progress.catalog.decor || []).map((d) => d.id),
     pilots: progress.catalog.characters.filter((c) => c.dev).map((c) => ({ id: c.id, name: c.name })) };
   return view_;
 }
@@ -569,9 +571,12 @@ function adjustPlayer(adminName, name, track, xp, credits) {
 /** Unlock (or remove) a ship / mod / paint in one mode. The free starter items can't be removed. */
 function setPlayerItem(adminName, name, track, kind, id, owned) {
   if (!["sp", "mp"].includes(track)) return { error: "Pick Single Player or Multiplayer." };
-  const table = { ships: progress.catalog.ships, mods: progress.catalog.mods, designs: progress.catalog.designs }[kind];
+  const table = { ships: progress.catalog.ships, mods: progress.catalog.mods, designs: progress.catalog.designs,
+    finishes: progress.catalog.finishes || [], decor: progress.catalog.decor || [] }[kind];
   if (!table || !table.some((x) => x.id === id)) return { error: "Unknown item." };
-  if (!owned && (id === "small" || id === "classic")) return { error: "Starter items can't be removed." };
+  if (!owned && (id === "small" || id === "classic" || (kind === "finishes" && id === "none"))) {
+    return { error: "Starter items can't be removed." };
+  }
   const u = db.prepare("SELECT * FROM users WHERE username = ?").get(String(name));
   if (!u) return { error: "No such player." };
   const user = toUser(u);
@@ -585,6 +590,8 @@ function setPlayerItem(adminName, name, track, kind, id, owned) {
     if (kind === "ships" && t.loadout.ship === id) t.loadout.ship = "small";
     if (kind === "designs" && t.loadout.design === id) t.loadout.design = "classic";
     if (kind === "mods") t.loadout.mods = t.loadout.mods.filter((x) => x !== id);
+    if (kind === "finishes" && t.loadout.finish === id) t.loadout.finish = "none";
+    if (kind === "decor") t.loadout.decor = (t.loadout.decor || []).filter((x) => x !== id);
   }
   // Ship change can lower the slot count: trim fitted mods to fit.
   const slots = (progress.catalog.ships.find((s) => s.id === t.loadout.ship) || { slots: 1 }).slots;

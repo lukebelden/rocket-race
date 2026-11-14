@@ -12,6 +12,7 @@ const Pilots := preload("res://scripts/ui/pilots.gd")
 const ModIcon := preload("res://scripts/ui/mod_icon.gd")
 const ModInfo := preload("res://scripts/game/mods.gd")
 const Rocket := preload("res://scripts/game/rocket.gd")
+const Cosmetics := preload("res://scripts/game/cosmetics.gd")
 
 const GOLD := Color(1, 0.75, 0.35)
 const SOFT := Color(0.8, 0.84, 0.92)
@@ -263,6 +264,7 @@ func _rocket_preview(parent: Control) -> void:
 	r.paint_main = Color.html(str(d.get("main", "#db3333")))
 	r.paint_dark = Color.html(str(d.get("dark", "#991a1f")))
 	r.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
+	r.finish = str(Profile.loadout(_track).get("finish", "none"))
 	r.mods.assign(Profile.loadout(_track)["mods"])
 	r.missile_count = 5
 	r.ship = str(Profile.loadout(_track)["ship"])
@@ -659,17 +661,20 @@ func _render_hangar() -> void:
 	_fill_ships(_column(cols, 0.95), true)
 	var middle := VBoxContainer.new()
 	middle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	middle.size_flags_stretch_ratio = 1.5
+	middle.size_flags_stretch_ratio = 1.8
 	middle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cols.add_child(middle)
+	# Name of the build on top; the floor in front of the rocket is kept clear for decorations.
+	var finish_name := str(Profile.finish(_track).get("name", ""))
+	_outlined(_label("%s  ·  %s%s" % [str(Profile.ship(_track).get("name", "Ship")),
+		str(Profile.design(_track).get("name", "")), "" if finish_name in ["", "Smooth"] else "  ·  " + finish_name],
+		18, Color("ffbf5a"), middle))
+	status = _label("", 15, SOFT, middle)
+	_outlined(status)
 	var air := Control.new()
 	air.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	air.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	middle.add_child(air)
-	_outlined(_label("%s  ·  %s" % [str(Profile.ship(_track).get("name", "Ship")),
-		str(Profile.design(_track).get("name", ""))], 18, Color("ffbf5a"), middle))
-	status = _label("", 15, SOFT, middle)
-	_outlined(status)
 	var back := _button("Back", close, middle, 220)
 	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	back.grab_focus()
@@ -755,18 +760,111 @@ func _pips(v: float, lo: float, hi: float) -> String:
 	return "■".repeat(n) + "□".repeat(3 - n)
 
 
+## Customization: paint, hull finish and hangar decorations, in one scrolling list.
 func _fill_custom(col: VBoxContainer, tall: bool) -> void:
 	_label("CUSTOMIZATION", 20, GOLD, col)
-	_label("Paint", 15, SOFT, col)
-	var body := _column_body(col, tall, 2)
+	var list: VBoxContainer = col
+	if tall:
+		var scroll := ScrollContainer.new()
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		col.add_child(scroll)
+		list = VBoxContainer.new()
+		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.add_theme_constant_override("separation", 8)
+		scroll.add_child(list)
 	var lo := Profile.loadout(_track)
+
+	_label("Paint", 16, SOFT, list)
+	var paints := _grid(list, tall)
 	for d in Profile.items("designs"):
 		var id := str(d["id"])
 		var owned := Profile.owns(_track, "designs", id)
-		var b := _card(body, str(d["name"]), "" if owned else "Shop", lo["design"] == id, not owned,
+		var b := _card(paints, str(d["name"]), "" if owned else "Shop", lo["design"] == id, not owned,
 			func() -> void: Profile.set_loadout(_track, {"design": id}), _swatch(d))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(90, 108)
+
+	_label("Finish", 16, SOFT, list)
+	var finishes := _grid(list, tall)
+	for f in Profile.items("finishes"):
+		var id := str(f["id"])
+		var owned := Profile.owns(_track, "finishes", id)
+		var b := _card(finishes, str(f["name"]), "" if owned else "Shop", str(lo.get("finish", "none")) == id, not owned,
+			func() -> void: Profile.set_loadout(_track, {"finish": id}), _finish_art(id))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(90, 108)
+
+	var placed: Array = lo.get("decor", [])
+	_label("Hangar Decor  (%d / %d placed)" % [placed.size(), Profile.decor_slots()], 16, SOFT, list)
+	var owned_decor: Array = Profile.track(_track)["owned"]["decor"]
+	if owned_decor.is_empty():
+		_label("Buy decorations in the Shop to place them around your rocket.", 13, DIM, list)
+	var decor := _grid(list, tall)
+	for d in Profile.items("decor"):
+		var id := str(d["id"])
+		if not owned_decor.has(id):
+			continue
+		var on := placed.has(id)
+		var b := _card(decor, str(d["name"]), "Placed" if on else "", on, false, _toggle_decor.bind(id), _decor_art(id))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(90, 108)
+
+
+## Cards grid inside a section: 2 per row in the Hangar column, a flow on phones.
+func _grid(parent: Control, tall: bool) -> Container:
+	if not tall:
+		return _flow(parent)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	parent.add_child(grid)
+	return grid
+
+
+func _toggle_decor(id: String) -> void:
+	var placed: Array = (Profile.loadout(_track).get("decor", []) as Array).duplicate()
+	if placed.has(id):
+		placed.erase(id)
+	elif placed.size() >= Profile.decor_slots():
+		_render()
+		_set_status("All %d spots are taken. Remove a decoration first." % Profile.decor_slots(), BAD)
+		return
+	else:
+		placed.append(id)
+	Profile.set_loadout(_track, {"decor": placed})
+
+
+## A square of the finish material (plain hull colour for "none", or if the art is missing).
+func _finish_art(id: String) -> Control:
+	var tex := Cosmetics.finish(id)
+	if tex == null:
+		var c := ColorRect.new()
+		c.color = Color("c9d2d8")
+		return c
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	return r
+
+
+## The decoration's picture (a crate icon if the art is missing).
+func _decor_art(id: String) -> Control:
+	var tex := Cosmetics.decor(id)
+	if tex == null:
+		var c := Control.new()
+		c.draw.connect(func() -> void:
+			c.draw_rect(Rect2(c.size * 0.2, c.size * 0.6), Color("b0804a"))
+			c.draw_rect(Rect2(c.size * 0.2, c.size * 0.6), Color("6b4a2a"), false, 2.0))
+		return c
+	var r := TextureRect.new()
+	r.texture = tex
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	return r
 
 
 # --- Pre-flight: fit starting mods (opened by Launch, or Mods in a multiplayer room) ---------
@@ -826,12 +924,12 @@ func _render_shop() -> void:
 			"Fly some runs to earn XP!" if _track == "sp" else "Race to earn Multiplayer XP!"], 17, SOFT)
 		_button("Back", close).grab_focus()
 		return
-	var tabs := _row()
-	for t in [["ships", "Ships"], ["mods", "Mods"], ["designs", "Paint"]]:
+	var tabs := _row(null, 6)
+	for t in [["ships", "Ships"], ["mods", "Mods"], ["designs", "Paint"], ["finishes", "Finish"], ["decor", "Decor"]]:
 		var b := _button(t[1], func() -> void:
 			_shop_tab = t[0]
 			_scroll_box = null
-			_render(), tabs, 130)
+			_render(), tabs, 108)
 		b.toggle_mode = true
 		b.button_pressed = _shop_tab == t[0]
 	var inner := _scroll(400)
@@ -855,6 +953,10 @@ func _shop_row(parent: Control, it: Dictionary) -> void:
 			desc = str(ModInfo.MODS[id]["desc"])
 		"designs":
 			art = _swatch(it)
+		"finishes":
+			art = _finish_art(id)
+		"decor":
+			art = _decor_art(id)
 		_:
 			art = Control.new()
 			var slots := int(it.get("slots", 1))
@@ -900,7 +1002,9 @@ func _buy(kind: String, id: String, title: String) -> void:
 	if err != "":
 		_set_status(err, BAD)
 	else:
-		_set_status("Bought %s! Fit it at your next pre-flight check." % title, GOOD)
+		var where: String = {"mods": "Fit it at your next pre-flight check.",
+			"decor": "Place it in the Hangar (Customization)."}.get(kind, "Pick it in the Hangar.")
+		_set_status("Bought %s! %s" % [title, where], GOOD)
 
 
 # --- Choose your pilot (new players, or "Change Pilot") -------------------------------------

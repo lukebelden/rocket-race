@@ -27,8 +27,8 @@ var token: String = ""
 var username: String = ""
 ## Account email (for password resets).
 var email: String = ""
-## {character, sp: track, mp: track, stats}; track = {xp, credits, owned: {ships, mods, designs},
-## loadout: {ship, design, mods}}
+## {character, sp: track, mp: track, stats}; track = {xp, credits, owned: {ships, mods, designs, finishes, decor},
+## loadout: {ship, design, mods, finish, decor}}
 var data: Dictionary = {}
 ## Admin accounts are the dev team: they can pick dev-only pilots (the Penguin).
 var is_dev: bool = false
@@ -52,8 +52,22 @@ func _ready() -> void:
 
 func new_track() -> Dictionary:
 	return {"xp": 0, "credits": 0,
-		"owned": {"ships": ["small"], "mods": [], "designs": ["classic"]},
-		"loadout": {"ship": "small", "design": "classic", "mods": []}}
+		"owned": {"ships": ["small"], "mods": [], "designs": ["classic"], "finishes": ["none"], "decor": []},
+		"loadout": {"ship": "small", "design": "classic", "mods": [], "finish": "none", "decor": []}}
+
+
+## Shop item kinds: ships, mods, paint (designs), hull finishes, hangar decorations.
+const KINDS := ["ships", "mods", "designs", "finishes", "decor"]
+
+
+## How many decorations fit in the hangar.
+func decor_slots() -> int:
+	return int(catalog.get("decor_slots", 4))
+
+
+## This mode's hull finish ({} for none / unknown).
+func finish(t: String) -> Dictionary:
+	return item("finishes", str(loadout(t).get("finish", "none")))
 
 
 func new_profile() -> Dictionary:
@@ -187,7 +201,14 @@ func _clean_loadout(tr: Dictionary, want: Dictionary) -> Dictionary:
 	var design_id := str(want.get("design", "classic"))
 	if not owned["designs"].has(design_id):
 		design_id = "classic"
-	return {"ship": ship_id, "design": design_id, "mods": mods}
+	var finish_id := str(want.get("finish", "none"))
+	if not owned["finishes"].has(finish_id):
+		finish_id = "none"
+	var decor: Array = []
+	for id in want.get("decor", []):
+		if owned["decor"].has(id) and not decor.has(id) and decor.size() < decor_slots():
+			decor.append(id)
+	return {"ship": ship_id, "design": design_id, "mods": mods, "finish": finish_id, "decor": decor}
 
 
 ## Accept a profile from the server or disk (also upgrades the older single-wallet shape).
@@ -209,7 +230,7 @@ func _clean_profile(src: Dictionary) -> Dictionary:
 		tr["credits"] = int(s.get("credits", 0))
 		var owned = s.get("owned", {})
 		if owned is Dictionary:
-			for kind in ["ships", "mods", "designs"]:
+			for kind in KINDS:
 				for id in owned.get(kind, []):
 					if not item(kind, str(id)).is_empty() and not tr["owned"][kind].has(str(id)):
 						tr["owned"][kind].append(str(id))
