@@ -419,7 +419,19 @@ function broadcast(room, msg, exceptId) {
 }
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, color: p.color, character: p.character };
+  return { id: p.id, name: p.name, color: p.color, character: p.character, ship: p.ship, paint: p.paint, mods: p.mods };
+}
+
+/** The multiplayer ship someone flies (shown in the pre-race intro): type, paint and mods. */
+function shipLook(profile) {
+  const lo = (profile && profile.mp && profile.mp.loadout) || {};
+  const designs = progress.catalog.designs || [];
+  const d = designs.find((x) => x.id === lo.design) || designs[0] || {};
+  return {
+    ship: lo.ship || "small",
+    paint: { main: d.main || "#e5683b", dark: d.dark || "#a8432a", body: d.body || "#e6efe9" },
+    mods: Array.isArray(lo.mods) ? lo.mods.filter(Boolean).slice(0, 3) : [],
+  };
 }
 
 function sendRoom(room) {
@@ -447,12 +459,14 @@ function addPlayer(room, client) {
   // Pick up the latest hangar choice (the pilot may have changed since logging in).
   const fresh = accounts.userForToken(client.token);
   if (fresh) client.character = fresh.profile.character;
+  const look = shipLook(fresh && fresh.profile);
   const player = {
     id: client.id,
     ws: client.ws,
     client,
     name: cleanName(client.username),
     character: client.character || "falcon",
+    ...look,
     color: freeColor(room),
     status: "lobby",
     d: 0,

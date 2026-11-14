@@ -1947,13 +1947,18 @@ func _begin_race(info: Dictionary) -> void:
 	race_intro = RaceIntro.new()
 	var players: Array = []
 	var me := Net.player(Net.my_id)
-	var my_paint := Color.html(str(Profile.design("mp").get("main", "#db3333")))
+	var my_design := Profile.design("mp")
+	var my_paint := Color.html(str(my_design.get("main", "#db3333")))
+	var my_loadout: Dictionary = Profile.loadout("mp")
 	players.append({"id": Net.my_id, "name": str(me.get("name", Profile.username)), "character": Profile.character(),
-		"color": my_paint.lightened(0.1), "me": true})
+		"color": my_paint.lightened(0.1), "me": true, "ship": str(my_loadout.get("ship", "small")),
+		"paint": {"main": str(my_design.get("main", "#e5683b")), "dark": str(my_design.get("dark", "#a8432a")),
+			"body": str(my_design.get("body", "#e6efe9"))}, "mods": my_loadout.get("mods", [])})
 	for p in Net.room.get("players", []):
 		if int(p.get("id", 0)) != Net.my_id:
 			players.append({"id": int(p["id"]), "name": str(p.get("name", "Pilot")),
-				"character": str(p.get("character", "duck")), "color": Color.html(str(p.get("color", "#ffffff")))})
+				"character": str(p.get("character", "falcon")), "color": Color.html(str(p.get("color", "#ffffff"))),
+				"ship": str(p.get("ship", "small")), "paint": p.get("paint", {}), "mods": p.get("mods", [])})
 	race_intro.setup(players, float(info.get("ready_timeout", 30.0)) - (Time.get_ticks_msec() - int(info.get("started_at", Time.get_ticks_msec()))) / 1000.0)
 	race_intro.ready_pressed.connect(Net.send_ready)
 	$UI/Root.add_child(race_intro)
