@@ -102,8 +102,31 @@ func set_volume(bus: String, volume: float) -> void:
 	var idx := AudioServer.get_bus_index(bus)
 	if idx == -1:
 		return
-	AudioServer.set_bus_mute(idx, volume <= 0.001)
+	if bus == "Master":
+		_master_silent = volume <= 0.001
+		_apply_master_mute()
+	else:
+		AudioServer.set_bus_mute(idx, volume <= 0.001)
 	AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(volume, 0.001)))
+
+
+## Silence everything while the game isn't the focused window (clicked off it, switched
+## tab or app); sound comes back when you return. The Master slider at 0 stays silent.
+var _focused := true
+var _master_silent := false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_focused = false
+		_apply_master_mute()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_focused = true
+		_apply_master_mute()
+
+
+func _apply_master_mute() -> void:
+	AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), _master_silent or not _focused)
 
 
 ## Give a button its click + hover sounds (once: buttons moved to a new parent are
