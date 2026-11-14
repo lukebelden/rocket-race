@@ -5,7 +5,7 @@ const Obstacle := preload("res://obstacle.gd")
 const Station := preload("res://station.gd")
 const Rocket := preload("res://rocket.gd")
 ## How big the player's rocket is drawn in flight (on top of the ship type's own size).
-const ROCKET_SCALE := 1.6
+const ROCKET_SCALE := 1.76
 const PlanetNode := preload("res://planet.gd")
 const StarLayer := preload("res://star_layer.gd")
 const ModInfo := preload("res://mods.gd")
