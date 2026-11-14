@@ -93,13 +93,10 @@ func leave_room() -> void:
 	room = {}
 
 
-func start_race() -> void:
-	send({"t": "start"})
-
-
-## On the pilot intro screen: "I'm ready".
-func send_ready() -> void:
-	send({"t": "ready"})
+## Ready-up screen: ready (true) or not ready (false, e.g. while visiting the hangar).
+## Once every pilot in the room is ready, the server launches the race.
+func send_ready(on := true) -> void:
+	send({"t": "ready", "on": on})
 
 
 ## Player info (name, color) for an id in the current room, or {}.
@@ -163,7 +160,7 @@ func _on_packet(text: String) -> String:
 		"error":
 			error.emit(str(msg.get("msg", "Something went wrong.")))
 		"start":
-			race_started.emit(int(msg.get("seed", 1)), float(msg.get("ready_timeout", 30)))
+			race_started.emit(int(msg.get("seed", 1)), 0.0)
 		"ready":
 			var ids = msg.get("ids", [])
 			ready_changed.emit(ids if ids is Array else [])

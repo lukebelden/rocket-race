@@ -29,7 +29,10 @@ const COUNTDOWN_MS = 3000;
 // Game's launch intro (game.gd INTRO_DURATION): the race clock starts after liftoff.
 const INTRO_MS = 3600;
 // Pre-race pilot intro: how long players get to press Ready before it's done for them.
-const READY_TIMEOUT_MS = 30000;
+// After everyone's ready: time for the ready-up screen's exit (doors seal, engines light).
+const LAUNCH_MS = 1600;
+// Everyone ready: a short window to change your mind (Cancel Ready stops the launch).
+const LAUNCH_GRACE_MS = 3000;
 const CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I / O (look like 1 / 0)
 // Racer colours from the game palette (palette.gd): distinct but calm.
 const COLORS = ["#4fb8a8", "#f0893c", "#5aa9e6", "#9a73d6"];
@@ -225,6 +228,7 @@ async function handleApi(req, res, url) {
       const error = progress.buy(user.profile, String(body.track), String(body.kind), String(body.id));
       if (error) return json(res, 400, { error });
       accounts.save(user);
+      refreshLook(user);
       return json(res, 200, { profile: accounts.view(user) });
     }
     if (route === "POST /api/character") {
@@ -232,11 +236,13 @@ async function handleApi(req, res, url) {
         return json(res, 403, { error: "That pilot isn't available." });
       }
       accounts.save(user);
+      refreshLook(user);
       return json(res, 200, { profile: accounts.view(user) });
     }
     if (route === "POST /api/loadout") {
       progress.setLoadout(user.profile, String(body.track), body);
       accounts.save(user);
+      refreshLook(user);
       return json(res, 200, { profile: accounts.view(user) });
     }
     if (route.startsWith("POST /api/account/")) {
@@ -389,10 +395,10 @@ async function handleAdminApi(req, res, url) {
 
 // --- Rooms -------------------------------------------------------------------------------
 
-/** code -> { code, hostId, phase: "lobby"|"intro"|"countdown"|"racing", players: Map<id, player>, raceStart,
- *  finishCount, ready: Set<id>, readyTimer }
- *  intro: everyone sees the pilots pop out of their hatches and presses Ready; when all are
- *  ready (or READY_TIMEOUT_MS passes) the countdown starts. */
+/** code -> { code, hostId, phase: "lobby"|"launching"|"countdown"|"racing", players: Map<id, player>,
+ *  raceStart, finishCount, ready: Set<id>, readyTimer }
+ *  lobby: the ready-up screen. Pilots can visit the hangar/shop and toggle Ready; once at least
+ *  MIN_PLAYERS are in and every one of them is ready, the race launches. */
 const rooms = new Map();
 let nextId = 1;
 
@@ -445,6 +451,8 @@ function sendRoom(room) {
       you: p.id,
       host: room.hostId,
       phase: room.phase,
+      ready: [...room.ready],
+      launch_in: room.launchAt ? Math.max(0, (room.launchAt - Date.now()) / 1000) : 0,
       min: MIN_PLAYERS,
       max: MAX_PLAYERS,
       players,
@@ -478,6 +486,7 @@ function addPlayer(room, client) {
   };
   room.players.set(player.id, player);
   client.room = room;
+  updateLaunch(room);  // a new (not ready) pilot stops a launch in progress
   sendRoom(room);
 }
 
@@ -488,45 +497,54 @@ function leaveRoom(client) {
   room.players.delete(client.id);
   if (room.players.size === 0) {
     clearTimeout(room.readyTimer);
+    clearTimeout(room.launchTimer);
     rooms.delete(room.code);
     return;
   }
   if (room.hostId === client.id) room.hostId = room.players.keys().next().value;
   broadcast(room, { t: "left", id: client.id });
-  if (room.phase === "intro") {
-    room.ready.delete(client.id);
-    sendReady(room);  // the rest may all be ready now
-  }
-  if (room.phase !== "lobby") checkRaceOver(room);
+  room.ready.delete(client.id);
+  if (room.phase !== "lobby" && room.phase !== "launching") checkRaceOver(room);
+  updateLaunch(room);  // the rest may all be ready now
   sendRoom(room);
 }
 
+/** Everyone in the room is ready (and there are enough pilots): launch after a short grace
+ *  window. Anyone cancelling Ready (or a new pilot joining, or someone leaving) stops it.
+ *  Call before sendRoom so the room message carries the launch time. */
+function updateLaunch(room) {
+  const all = room.phase === "lobby" && room.players.size >= MIN_PLAYERS &&
+    [...room.players.keys()].every((id) => room.ready.has(id));
+  if (all && !room.launchTimer) {
+    room.launchAt = Date.now() + LAUNCH_GRACE_MS;
+    room.launchTimer = setTimeout(() => {
+      room.launchTimer = null;
+      room.launchAt = 0;
+      startRace(room);
+    }, LAUNCH_GRACE_MS);
+  } else if (!all && room.launchTimer) {
+    clearTimeout(room.launchTimer);
+    room.launchTimer = null;
+    room.launchAt = 0;
+  }
+}
+
 function startRace(room) {
-  room.phase = "intro";
+  room.phase = "launching";
   room.finishCount = 0;
-  room.ready = new Set();
   for (const p of room.players.values()) {
     Object.assign(p, { status: "racing", d: 0, score: 0, timeMs: 0, place: 0 });
   }
   const seed = crypto.randomInt(1, 2 ** 31 - 1);
-  broadcast(room, { t: "start", seed, intro: true, ready_timeout: READY_TIMEOUT_MS / 1000 });
+  broadcast(room, { t: "start", seed });
   sendRoom(room);
-  // Nobody can stall the race: anyone not ready in time is readied automatically.
   clearTimeout(room.readyTimer);
-  room.readyTimer = setTimeout(() => goRace(room), READY_TIMEOUT_MS);
+  room.readyTimer = setTimeout(() => goRace(room), LAUNCH_MS);
 }
 
-function sendReady(room) {
-  broadcast(room, { t: "ready", ids: [...room.ready] });
-  if (room.phase === "intro" && [...room.players.keys()].every((id) => room.ready.has(id))) {
-    clearTimeout(room.readyTimer);
-    room.readyTimer = setTimeout(() => goRace(room), 900);  // a moment to see the last READY stamp
-  }
-}
-
-/** Everyone's ready: start the 3-2-1 countdown. */
+/** Start the 3-2-1 countdown on the pad. */
 function goRace(room) {
-  if (room.phase !== "intro") return;
+  if (room.phase !== "launching") return;
   clearTimeout(room.readyTimer);
   room.phase = "countdown";
   room.raceStart = Date.now() + COUNTDOWN_MS + INTRO_MS;
@@ -535,6 +553,22 @@ function goRace(room) {
   setTimeout(() => {
     if (room.phase === "countdown") room.phase = "racing";
   }, COUNTDOWN_MS);
+}
+
+/** Someone changed their hangar loadout / bought something / picked a pilot: update their bay
+ *  for everyone in their room. */
+function refreshLook(user) {
+  for (const room of rooms.values()) {
+    for (const p of room.players.values()) {
+      if (!p.client.token) continue;
+      const u = accounts.userForToken(p.client.token);
+      if (!u || u.id !== user.id) continue;
+      Object.assign(p, shipLook(user.profile));
+      p.character = user.profile.character;
+      p.client.character = user.profile.character;
+      sendRoom(room);
+    }
+  }
 }
 
 function checkRaceOver(room) {
@@ -553,6 +587,7 @@ function checkRaceOver(room) {
   broadcast(room, { t: "results", ranking });
   giveRaceRewards(room, ranking);
   room.phase = "lobby";
+  room.ready = new Set();
   clearTimeout(room.readyTimer);
   for (const p of players) p.status = "lobby";
   sendRoom(room);
@@ -600,7 +635,7 @@ function handle(client, msg) {
       if (!client.token) return send(client.ws, { t: "error", msg: "Log in to play multiplayer." });
       if (room) leaveRoom(client);
       const code = newCode();
-      const created = { code, hostId: client.id, phase: "lobby", players: new Map(), raceStart: 0, finishCount: 0 };
+      const created = { code, hostId: client.id, phase: "lobby", players: new Map(), raceStart: 0, finishCount: 0, ready: new Set() };
       rooms.set(code, created);
       addPlayer(created, client);
       break;
@@ -621,20 +656,13 @@ function handle(client, msg) {
       leaveRoom(client);
       send(client.ws, { t: "left_room" });
       break;
-    case "start": {
-      if (!room) return;
-      if (room.hostId !== client.id) return send(client.ws, { t: "error", msg: "Only the host can start the race." });
-      if (room.phase !== "lobby") return;
-      if (room.players.size < MIN_PLAYERS) {
-        return send(client.ws, { t: "error", msg: `Need at least ${MIN_PLAYERS} pilots to race.` });
-      }
-      startRace(room);
-      break;
-    }
     case "ready": {
-      if (!room || room.phase !== "intro" || room.ready.has(client.id)) return;
-      room.ready.add(client.id);
-      sendReady(room);
+      // Toggle on the ready-up screen: {on: true} ready, {on: false} not ready (e.g. off to the hangar).
+      if (!room || room.phase !== "lobby") return;
+      if (msg.on === false) room.ready.delete(client.id);
+      else room.ready.add(client.id);
+      updateLaunch(room);
+      sendRoom(room);
       break;
     }
     case "state": {

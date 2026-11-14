@@ -1,19 +1,24 @@
 extends Control
-## Multiplayer ready-up: a full-screen line-up of 4 launch bays, yours on the left.
-## Each bay shows that racer's own rocket (ship type, paint, fitted mods) on its launch pad,
-## and below it their pilot monitor behind an airlock door. The door slides open when the
-## pilot arrives and seals shut when they press READY; the light beside the monitor turns
-## green. Empty bays show a bare pad and a dead monitor. When the server says go, the
-## engines light and the bays slide away to the launch pad.
+## Multiplayer room screen (ready-up): what you see as soon as you create or join a room.
+## A line-up of 4 launch bays, yours on the left. Each bay shows that racer's own rocket
+## (ship type, paint, fitted mods) on its pad, and below it their pilot monitor behind an
+## airlock door: open while they're getting ready, sealed once they press READY, with a light
+## beside it that turns green. Empty bays show a bare pad and a dead monitor.
+##
+## Buttons: Hangar / Shop (change your build - your bay updates for everyone), READY (a
+## toggle) and Leave. Once every pilot is ready the server launches the race: the doors seal,
+## the engines light and the bays slide away (play_exit).
 
-signal ready_pressed
+signal ready_toggled(on: bool)
+signal hangar_pressed
+signal shop_pressed
+signal leave_pressed
 
 const Pilots := preload("res://pilots.gd")
 const Palette := preload("res://palette.gd")
 const Rocket := preload("res://rocket.gd")
 const SLOTS := 4
-const STAGGER := 0.35  # seconds between bays appearing
-const APPEAR := 0.2
+const STAGGER := 0.3  # seconds between bays appearing when the screen opens
 
 const METAL := Color("2a2e35")
 const METAL_HI := Color("4b525d")
@@ -24,22 +29,26 @@ const GREEN := Color("7ed6a0")
 
 ## [{id, name, character, color: Color, me: bool, ship, paint: {main, dark, body}, mods}] - you first.
 var pilots: Array = []
-var _ready_ids: Dictionary = {}  # id -> time they pressed READY
-var _left_ids: Dictionary = {}   # id -> time they left
-var _arrived: Dictionary = {}    # slot -> arrival sound played
-var _rockets: Dictionary = {}    # slot -> Rocket node
+var code := ""
+var min_players := 2
+var last_results: Array = []
+## Everyone's ready: the race launches at this time (Time.get_ticks_msec), 0 = not launching.
+var launch_at := 0
+
+var _arrived_at: Dictionary = {}   # id -> time their bay appeared
+var _ready_at: Dictionary = {}     # id -> time they became ready
+var _unready_at: Dictionary = {}   # id -> time they cancelled ready
+var _arrive_sound: Dictionary = {} # id -> arrival sound played
+var _rockets: Dictionary = {}      # id -> Rocket node
+var _looks: Dictionary = {}        # id -> look signature (rebuild the rocket when it changes)
+var _my_id := -1
 var _t := 0.0
 var _exit_t := -1.0
-var _deadline := 0.0
-var _button: Button
-var _status: Label
 var _font: Font
 var _stars: Array[Vector3] = []
-
-
-func setup(players: Array, ready_timeout: float) -> void:
-	pilots = players
-	_deadline = ready_timeout
+var _bar: HBoxContainer
+var _ready_button: Button
+var _status: Label
 
 
 func _ready() -> void:
@@ -52,43 +61,23 @@ func _ready() -> void:
 	for i in 120:
 		_stars.append(Vector3(rng.randf(), rng.randf(), rng.randf_range(0.5, 1.8)))
 
-	# Each racer's real rocket, as a display model standing on its pad.
-	for i in mini(pilots.size(), SLOTS):
-		var p: Dictionary = pilots[i]
-		var r := Rocket.new()
-		r.ship = str(p.get("ship", "small"))
-		var paint: Dictionary = p.get("paint", {})
-		r.paint_main = Color.html(str(paint.get("main", "#e5683b")))
-		r.paint_dark = Color.html(str(paint.get("dark", "#a8432a")))
-		r.paint_body = Color.html(str(paint.get("body", "#e6efe9")))
-		for m in p.get("mods", []):
-			r.mods.append(str(m))
-		r.missile_count = 2
-		r.active = false
-		r.flame_on = false
-		r.monitoring = false
-		r.monitorable = false
-		r.visible = false
-		add_child(r)
-		r.set_process(false)  # just a picture until the engines light
-		r.set_process_unhandled_input(false)
-		_rockets[i] = r
-
-	_button = Button.new()
-	_button.text = "READY!"
-	_button.custom_minimum_size = Vector2(260, 54)
-	_button.add_theme_font_size_override("font_size", 26)
-	_button.anchor_left = 0.5
-	_button.anchor_right = 0.5
-	_button.anchor_top = 1.0
-	_button.anchor_bottom = 1.0
-	_button.offset_left = -130
-	_button.offset_right = 130
-	_button.offset_top = -92
-	_button.offset_bottom = -38
-	_button.disabled = true  # until your own airlock has opened
-	_button.pressed.connect(_on_ready)
-	add_child(_button)
+	# Bottom row: Hangar, Shop, READY (toggle), Leave.
+	_bar = HBoxContainer.new()
+	_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	_bar.add_theme_constant_override("separation", 12)
+	_bar.anchor_left = 0.0
+	_bar.anchor_right = 1.0
+	_bar.anchor_top = 1.0
+	_bar.anchor_bottom = 1.0
+	_bar.offset_top = -92
+	_bar.offset_bottom = -40
+	add_child(_bar)
+	_bar_button("Hangar", 150, func() -> void: hangar_pressed.emit())
+	_bar_button("Shop", 150, func() -> void: shop_pressed.emit())
+	_ready_button = _bar_button("READY!", 230, _on_ready_pressed)
+	_ready_button.add_theme_font_size_override("font_size", 24)
+	_ready_button.disabled = true  # until your airlock has opened
+	_bar_button("Leave", 150, func() -> void: leave_pressed.emit())
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.add_theme_font_size_override("font_size", 15)
@@ -97,34 +86,125 @@ func _ready() -> void:
 	_status.anchor_right = 1.0
 	_status.anchor_top = 1.0
 	_status.anchor_bottom = 1.0
-	_status.offset_top = -32
-	_status.offset_bottom = -10
+	_status.offset_top = -34
+	_status.offset_bottom = -12
 	add_child(_status)
 
 
-func _on_ready() -> void:
-	_button.disabled = true
-	_button.text = "You're ready!"
-	ready_pressed.emit()
+func _bar_button(text: String, width: float, on_press: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(width, 52)
+	b.add_theme_font_size_override("font_size", 20)
+	b.pressed.connect(on_press)
+	_bar.add_child(b)
+	return b
 
 
-## Server update: these player ids have pressed Ready (their airlock seals).
-func set_ready(ids: Array) -> void:
+func _is_ready(id: int) -> bool:
+	return _ready_at.has(id)
+
+
+func _on_ready_pressed() -> void:
+	ready_toggled.emit(not _is_ready(_my_id))
+
+
+## The room as the server sees it (players, who's ready): rebuild the line-up.
+func set_room(room: Dictionary, my_id: int) -> void:
+	_my_id = my_id
+	code = str(room.get("code", ""))
+	min_players = int(room.get("min", 2))
+	var launch_in := float(room.get("launch_in", 0.0))
+	launch_at = Time.get_ticks_msec() + int(launch_in * 1000.0) if launch_in > 0.0 else 0
+	var list: Array = []
+	for p in room.get("players", []):
+		var id := int(p.get("id", 0))
+		var entry := {"id": id, "name": str(p.get("name", "Pilot")), "character": str(p.get("character", "falcon")),
+			"color": Color.html(str(p.get("color", "#ffffff"))), "me": id == my_id, "ship": str(p.get("ship", "small")),
+			"paint": p.get("paint", {}) if p.get("paint") is Dictionary else {},
+			"mods": p.get("mods", []) if p.get("mods") is Array else []}
+		if id == my_id:
+			list.push_front(entry)
+		else:
+			list.append(entry)
+	pilots = list.slice(0, SLOTS)
+
+	# Arrivals (staggered when the screen first opens) and departures.
+	var ids := {}
+	for i in pilots.size():
+		var id := int(pilots[i]["id"])
+		ids[id] = true
+		if not _arrived_at.has(id):
+			_arrived_at[id] = _t + (i * STAGGER if _t < 0.5 else 0.0)
+	for id in _rockets.keys():
+		if not ids.has(id):
+			_rockets[id].queue_free()
+			_rockets.erase(id)
+			_looks.erase(id)
+	for id in _arrived_at.keys():
+		if not ids.has(id):
+			_arrived_at.erase(id)
+			_ready_at.erase(id)
+			_unready_at.erase(id)
+
+	# Who's ready: doors seal (with a clunk) or reopen.
+	var ready_now := {}
+	for r in room.get("ready", []):
+		ready_now[int(r)] = true
 	for id in ids:
-		if not _ready_ids.has(int(id)):
-			_ready_ids[int(id)] = _t
-			Sound.play("detach", 0.9, -4.0)  # airlock door clunks shut
+		if ready_now.has(id) and not _ready_at.has(id):
+			_ready_at[id] = _t
+			_unready_at.erase(id)
+			Sound.play("detach", 0.9, -4.0)
+		elif not ready_now.has(id) and _ready_at.has(id):
+			_ready_at.erase(id)
+			_unready_at[id] = _t
+
+	# Each racer's rocket: rebuilt when their build changes in the hangar or shop.
+	for p in pilots:
+		var id := int(p["id"])
+		var look := JSON.stringify([p["ship"], p["paint"], p["mods"]])
+		if _looks.get(id, "") == look:
+			continue
+		if _rockets.has(id):
+			_rockets[id].queue_free()
+		_rockets[id] = _make_rocket(p)
+		_looks[id] = look
+	if _ready_button:
+		_ready_button.text = "CANCEL READY" if _is_ready(_my_id) else "READY!"
 
 
-func pilot_left(id: int) -> void:
-	_left_ids[id] = _t
+func set_last_results(ranking: Array) -> void:
+	last_results = ranking
+
+
+func _make_rocket(p: Dictionary) -> Rocket:
+	var r := Rocket.new()
+	r.ship = str(p.get("ship", "small"))
+	var paint: Dictionary = p.get("paint", {})
+	r.paint_main = Color.html(str(paint.get("main", "#e5683b")))
+	r.paint_dark = Color.html(str(paint.get("dark", "#a8432a")))
+	r.paint_body = Color.html(str(paint.get("body", "#e6efe9")))
+	for m in p.get("mods", []):
+		r.mods.append(str(m))
+	r.missile_count = 2
+	r.active = false
+	r.flame_on = false
+	r.monitoring = false
+	r.monitorable = false
+	r.visible = false
+	add_child(r)
+	move_child(r, 0)  # behind the buttons
+	r.set_process(false)  # just a picture until the engines light
+	r.set_process_unhandled_input(false)
+	return r
 
 
 ## Everyone's ready: engines light, the bays slide away (then it frees itself).
 func play_exit() -> void:
 	if _exit_t < 0.0:
 		_exit_t = 0.0
-		_button.visible = false
+		_bar.visible = false
 		_status.visible = false
 		for r: Rocket in _rockets.values():
 			r.flame_on = true
@@ -141,27 +221,33 @@ func _process(delta: float) -> void:
 			queue_free()
 	else:
 		# Your READY button wakes up once your own airlock is open.
-		if _button.disabled and _button.text == "READY!" and _t > APPEAR + 1.0:
-			_button.disabled = false
-			_button.grab_focus()
-		var left := maxf(_deadline - _t, 0.0)
-		_status.text = "Race starts automatically in %ds" % ceili(left)
+		if _ready_button.disabled and _t - float(_arrived_at.get(_my_id, 0.0)) > 0.9:
+			_ready_button.disabled = false
+			_ready_button.grab_focus()
+		var ready_count := 0
+		for p in pilots:
+			if _is_ready(int(p["id"])):
+				ready_count += 1
+		var waiting := pilots.size() - ready_count
+		if pilots.size() < min_players:
+			_status.text = "Waiting for at least %d pilots - share the room code with your friends!" % min_players
+		elif waiting > 0:
+			_status.text = "Waiting for %d pilot%s to get ready" % [waiting, "" if waiting == 1 else "s"]
+		elif launch_at > 0:
+			var secs := ceili(maxf(launch_at - Time.get_ticks_msec(), 0) / 1000.0)
+			_status.text = "All pilots ready - launching in %d...   (Cancel Ready to wait)" % secs
+		else:
+			_status.text = "All pilots ready - launching!"
 	queue_redraw()
 
 
 # --- Layout --------------------------------------------------------------------------------
 
-func _ease_back(x: float) -> float:
-	x = clampf(x, 0.0, 1.0)
-	var c := 1.9
-	return 1.0 + (c + 1.0) * pow(x - 1.0, 3.0) + c * pow(x - 1.0, 2.0)
-
-
 func _slot_rects() -> Array[Rect2]:
 	var w := size.x
 	var h := size.y
 	var rects: Array[Rect2] = []
-	var top := 74.0
+	var top := 84.0
 	var bottom := h - 104.0
 	if h > w:  # portrait: 2 x 2
 		var cw := (w - 36.0) / 2.0
@@ -187,9 +273,16 @@ func _draw() -> void:
 	for s in _stars:
 		draw_circle(Vector2(s.x * size.x, fmod(s.y * size.y + _t * 8.0 * s.z, size.y)), s.z * 0.8,
 			Color(Palette.MIST, (0.2 + 0.4 * absf(sin(_t * s.z + s.x * 30.0))) * fade))
-	var title := "PILOTS, TO YOUR ROCKETS!"
-	var tw := _font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 32).x
-	draw_string(_font, Vector2((size.x - tw) / 2.0, 52), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(Palette.AMBER, fade))
+	var title := "ROOM  %s" % code if code != "" else "PILOTS, TO YOUR ROCKETS!"
+	_center_text(title, Vector2(size.x / 2.0, 36), 32, Color(Palette.AMBER, fade))
+	var sub := "Share this code with friends so they can join"
+	if not last_results.is_empty():
+		var podium: Array[String] = []
+		for row in last_results:
+			if row is Dictionary:
+				podium.append("%d. %s" % [int(row.get("rank", 0)), str(row.get("name", "?"))])
+		sub = "Last race:  " + "   ".join(podium)
+	_center_text(sub, Vector2(size.x / 2.0, 66), 14, Color(Palette.TEXT_DIM, fade))
 
 	var rects := _slot_rects()
 	for i in SLOTS:
@@ -197,9 +290,13 @@ func _draw() -> void:
 
 
 func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
-	var t := _t - (APPEAR + i * STAGGER)
-	var rocket: Rocket = _rockets.get(i)
+	var empty := p.is_empty()
+	var id := -1 if empty else int(p["id"])
+	var t := _t - (float(_arrived_at.get(id, 0.0)) if not empty else i * STAGGER)
+	var rocket: Rocket = _rockets.get(id)
 	if t < 0.0:
+		if rocket:
+			rocket.visible = false
 		return
 	var appear := clampf(t / 0.3, 0.0, 1.0)
 	var lift := 0.0  # exit: bays slide up and away, left to right
@@ -208,9 +305,6 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 	var r := rect
 	r.position.y += (1.0 - appear) * 30.0 - lift * lift * (r.end.y + 60.0)
 	var alpha := appear
-	var empty := p.is_empty()
-	var id := -1 if empty else int(p["id"])
-	var gone := not empty and _left_ids.has(id)
 	var color: Color = Palette.SLATE if empty else p["color"]
 
 	# Column frame.
@@ -237,20 +331,19 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 	while stripe_x < pad.end.x - 6.0:  # hazard edge on the pad
 		draw_rect(Rect2(stripe_x, pad.position.y + 2, 6, 3), Color(HAZARD, 0.85 * alpha))
 		stripe_x += 12.0
-	var lamps_on := not empty and not gone
 	for s: float in [0.0, 1.0]:  # pad lamps
 		var lx := pad.position.x + 4.0 + s * (pad.size.x - 8.0)
 		draw_rect(Rect2(lx - 1, pad_y - 14, 2, 14), Color(METAL_HI, alpha))
-		var lamp := (Color(Palette.AMBER) if fmod(_t + s * 0.5, 1.0) < 0.6 else Color(Palette.RUST)) if lamps_on else Color(METAL_LO)
-		if lamps_on:
+		var lamp := (Color(Palette.AMBER) if fmod(_t + s * 0.5, 1.0) < 0.6 else Color(Palette.RUST)) if not empty else Color(METAL_LO)
+		if not empty:
 			Palette.glow(self, Vector2(lx, pad_y - 16), 9.0, Palette.AMBER, alpha)
 		draw_circle(Vector2(lx, pad_y - 16), 2.6, Color(lamp, alpha))
 	if rocket:
 		var k := minf(bay.size.y * 0.9 / 92.0, bay.size.x * 0.6 / 44.0)
-		rocket.visible = not gone or (_t - float(_left_ids.get(id, _t))) < 0.4
+		rocket.visible = true
 		rocket.scale = Vector2.ONE * k
 		rocket.position = Vector2(bay.get_center().x, pad_y - 26.0 * k)
-		rocket.modulate.a = alpha * (0.35 if gone else 1.0)
+		rocket.modulate.a = alpha
 		rocket.queue_redraw()
 	if empty:
 		_center_text("EMPTY BAY", Vector2(bay.get_center().x, bay.position.y + 22), 13, Color(Palette.TEXT_DIM, 0.7 * alpha))
@@ -260,8 +353,7 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 	var light_w := 22.0
 	var mon := Rect2(r.position.x + 8, mon_top, r.size.x - 16 - light_w - 6, r.end.y - mon_top - 40)
 	_draw_monitor(i, mon, p, t, alpha)
-	var ready := not empty and _ready_ids.has(id)
-	_draw_light(Rect2(mon.end.x + 6, mon.position.y, light_w, mon.size.y), ready, empty or gone, alpha)
+	_draw_light(Rect2(mon.end.x + 6, mon.position.y, light_w, mon.size.y), not empty and _is_ready(id), empty, alpha)
 
 	# Name plate (YOU tag) under the monitor.
 	var name_c := Vector2(r.get_center().x, r.end.y - 20)
@@ -271,9 +363,7 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 		var label := str(p["name"]).left(14)
 		if bool(p.get("me", false)):
 			label = "YOU · " + label
-		_center_text(label, name_c, 16, Color(color.lightened(0.35) if not gone else Palette.TEXT_DIM, alpha))
-		if gone:
-			_center_text("LEFT", Vector2(mon.get_center().x, mon.get_center().y), 20, Color(Palette.BAD, alpha))
+		_center_text(label, name_c, 16, Color(color.lightened(0.35), alpha))
 
 
 ## Gunmetal monitor: pixel feed of the pilot, with the airlock's two doors sliding over it.
@@ -282,8 +372,7 @@ func _draw_monitor(i: int, mon: Rect2, p: Dictionary, t: float, alpha: float) ->
 	draw_rect(mon, Color(METAL_HI, alpha), false, 2.0)
 	var scr := mon.grow(-6)
 	draw_rect(scr, Color(PHOSPHOR, alpha))
-	var empty := p.is_empty()
-	if empty:
+	if p.is_empty():
 		_center_text("NO PILOT", scr.get_center(), 13, Color(Palette.TEXT_DIM, 0.5 * alpha))
 		return
 	var id := int(p["id"])
@@ -300,16 +389,16 @@ func _draw_monitor(i: int, mon: Rect2, p: Dictionary, t: float, alpha: float) ->
 		y += 3.0
 	draw_circle(scr.position + Vector2(7, 7), 2.5, Color("ef3b3b", alpha) if fmod(_t, 1.2) < 0.75 else Color("5a1e1e", alpha))
 
-	# Airlock: shut when the bay appears, slides open as the pilot arrives, seals on READY
-	# (and when they leave, or as the race starts).
+	# Airlock: shut when the bay appears, slides open as the pilot arrives, seals on READY,
+	# reopens if they cancel, and seals as the race launches.
 	var open := clampf((t - 0.45) / 0.45, 0.0, 1.0)
-	if t > 0.45 and not _arrived.has(i) and _exit_t < 0.0:
-		_arrived[i] = true
+	if t > 0.45 and not _arrive_sound.has(id) and _exit_t < 0.0:
+		_arrive_sound[id] = true
 		Sound.play("dock", 1.2 + i * 0.08, -8.0)
-	if _ready_ids.has(id):
-		open = minf(open, 1.0 - clampf((_t - float(_ready_ids[id])) / 0.3, 0.0, 1.0))
-	if _left_ids.has(id):
-		open = minf(open, 1.0 - clampf((_t - float(_left_ids[id])) / 0.3, 0.0, 1.0))
+	if _ready_at.has(id):
+		open = minf(open, 1.0 - clampf((_t - float(_ready_at[id])) / 0.3, 0.0, 1.0))
+	elif _unready_at.has(id):
+		open = minf(open, clampf((_t - float(_unready_at[id])) / 0.35, 0.0, 1.0))
 	if _exit_t >= 0.0:
 		open = minf(open, 1.0 - clampf(_exit_t / 0.3, 0.0, 1.0))
 	var half := scr.size.x / 2.0 * (1.0 - open)
@@ -327,12 +416,11 @@ func _draw_monitor(i: int, mon: Rect2, p: Dictionary, t: float, alpha: float) ->
 				draw_rect(Rect2(edge_x, by, minf(7.0, door.size.x), minf(6.0, door.end.y - by)), Color(HAZARD if on else METAL_LO, alpha))
 				on = not on
 				by += 6.0
-			# rivets
-			if door.size.x > 16.0:
+			if door.size.x > 16.0:  # rivets
 				var rx := door.position.x + 5.0 if s == 0 else door.end.x - 5.0
 				for ry: float in [door.position.y + 8.0, door.end.y - 8.0]:
 					draw_circle(Vector2(rx, ry), 1.6, Color(METAL_LO, alpha))
-		if open <= 0.01 and _ready_ids.has(id) and not _left_ids.has(id):
+		if open <= 0.01 and _ready_at.has(id):
 			_center_text("SEALED", scr.get_center() + Vector2(0, scr.size.y * 0.3), 11, Color(GREEN, 0.9 * alpha))
 
 
@@ -353,10 +441,10 @@ func _draw_light(r: Rect2, ready: bool, dead: bool, alpha: float) -> void:
 	draw_circle(c, lens + 2.0, Color(METAL_LO, alpha))
 	draw_circle(c, lens, Color(col, alpha))
 	draw_circle(c + Vector2(-2, -2), 2.0, Color(1, 1, 1, 0.45 * alpha))
-	# little stack of indicator ticks under the lens
-	for k in 3:
+	for k in 3:  # indicator ticks under the lens
 		var on := ready or (not dead and k == 0)
-		draw_rect(Rect2(r.position.x + 6, c.y + 14 + k * 8, r.size.x - 12, 4), Color(GREEN if (ready and on) else (Palette.AMBER if on else METAL_LO), alpha * (0.9 if on else 0.6)))
+		draw_rect(Rect2(r.position.x + 6, c.y + 14 + k * 8, r.size.x - 12, 4),
+			Color(GREEN if (ready and on) else (Palette.AMBER if on else METAL_LO), alpha * (0.9 if on else 0.6)))
 
 
 func _center_text(text: String, c: Vector2, fs: int, color: Color) -> void:

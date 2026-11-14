@@ -140,8 +140,10 @@ var mode_menu: Control
 var _menu_track := ""
 var hangar_bg: Control
 var delete_button: Button
-## Multiplayer pre-race pilot intro (race_intro.gd), while it's up.
-var race_intro: Control
+## Multiplayer room screen (race_intro.gd): the ready-up line-up, while you're in a room.
+var room_screen: Control
+## Hangar / Shop opened from the room screen: closing it goes back to the room.
+var _room_return := false
 ## Checked the saved login with the server once per game session.
 static var _profile_checked: bool = false
 
@@ -347,9 +349,6 @@ func _ready() -> void:
 	Net.disconnected.connect(_on_net_disconnected)
 	Net.race_started.connect(_on_race_started)
 	Net.race_go.connect(_on_race_go)
-	Net.ready_changed.connect(func(ids: Array) -> void:
-		if is_instance_valid(race_intro):
-			race_intro.set_ready(ids))
 	Net.rival_state.connect(func(id: int, data: Dictionary) -> void: rivals_node.update_rival(id, data))
 	Net.rival_done.connect(_on_rival_done)
 	Net.rival_left.connect(_on_rival_left)
@@ -1924,9 +1923,10 @@ func _hull_breach() -> void:
 
 
 # --- Multiplayer race ------------------------------------------------------------
-# Flow: Menu -> Multiplayer (name, create/join a room) -> Lobby (host presses Start Race)
-# -> the server sends a seed -> the scene reloads into race mode -> countdown on the pad ->
-# everyone launches together -> first through Level RACE_LEVELS wins -> results -> Lobby.
+# Flow: Menu -> Multiplayer (create / join a room) -> the room's ready-up screen (visit the
+# Hangar / Shop, toggle READY) -> once everyone's ready the server sends a seed -> the scene
+# reloads into race mode -> countdown on the pad -> everyone launches together -> first
+# through Level RACE_LEVELS wins -> results -> back to the room.
 
 ## Called from _ready() after the scene reloads for a race.
 func _begin_race(info: Dictionary) -> void:
@@ -1945,37 +1945,23 @@ func _begin_race(info: Dictionary) -> void:
 			_add_rival_card(id, p)
 	_show_menu()
 	_go_to_pad()
-	# Pilot intro first: the countdown only starts once everyone has pressed Ready.
-	race_launch_at = 0
-	launch_prompt.visible = false
-	race_intro = RaceIntro.new()
-	var players: Array = []
-	var me := Net.player(Net.my_id)
-	var my_design := Profile.design("mp")
-	var my_paint := Color.html(str(my_design.get("main", "#db3333")))
-	var my_loadout: Dictionary = Profile.loadout("mp")
-	players.append({"id": Net.my_id, "name": str(me.get("name", Profile.username)), "character": Profile.character(),
-		"color": my_paint.lightened(0.1), "me": true, "ship": str(my_loadout.get("ship", "small")),
-		"paint": {"main": str(my_design.get("main", "#e5683b")), "dark": str(my_design.get("dark", "#a8432a")),
-			"body": str(my_design.get("body", "#e6efe9"))}, "mods": my_loadout.get("mods", [])})
-	for p in Net.room.get("players", []):
-		if int(p.get("id", 0)) != Net.my_id:
-			players.append({"id": int(p["id"]), "name": str(p.get("name", "Pilot")),
-				"character": str(p.get("character", "falcon")), "color": Color.html(str(p.get("color", "#ffffff"))),
-				"ship": str(p.get("ship", "small")), "paint": p.get("paint", {}), "mods": p.get("mods", [])})
-	race_intro.setup(players, float(info.get("ready_timeout", 30.0)) - (Time.get_ticks_msec() - int(info.get("started_at", Time.get_ticks_msec()))) / 1000.0)
-	race_intro.ready_pressed.connect(Net.send_ready)
-	$UI/Root.add_child(race_intro)
+	# Everyone readied up in the room: the countdown starts when the server says go
+	# (that message may already have arrived while the scene was reloading).
+	race_launch_at = int(info.get("go_at", 0))
+	launch_prompt.visible = true
+	launch_prompt.text = "LAUNCH SEQUENCE\nSTANDBY"
+	if race_launch_at != 0:
+		_update_race_countdown(0.0)
 
 
 ## Everyone's ready (server "go"): pilots climb back in, then the countdown runs on the pad.
 func _on_race_go(countdown: float) -> void:
 	if not race_mode:
+		if not race_pending.is_empty():  # arrived before the race scene loaded: hand it over
+			race_pending["go_at"] = Time.get_ticks_msec() + int(countdown * 1000.0)
 		return
 	race_launch_at = Time.get_ticks_msec() + int(countdown * 1000.0)
 	launch_prompt.visible = true
-	if is_instance_valid(race_intro):
-		race_intro.play_exit()
 	_update_race_countdown(0.0)
 
 
@@ -2098,9 +2084,15 @@ func _ordinal(n: int) -> String:
 
 # Server messages ---------------------------------------------------------------------
 
-func _on_race_started(course_seed: int, ready_timeout: float) -> void:
-	race_pending = {"seed": course_seed, "ready_timeout": ready_timeout, "started_at": Time.get_ticks_msec()}
+func _on_race_started(course_seed: int, _ready_timeout: float) -> void:
+	race_pending = {"seed": course_seed}
 	last_results = []
+	if is_instance_valid(room_screen):
+		if profile_ui.screen.visible:
+			profile_ui.close()
+		room_screen.visible = true
+		room_screen.play_exit()
+		await get_tree().create_timer(1.1).timeout
 	get_tree().reload_current_scene()
 
 
@@ -2117,8 +2109,6 @@ func _on_rival_done(kind: String, data: Dictionary) -> void:
 
 
 func _on_rival_left(id: int) -> void:
-	if is_instance_valid(race_intro):
-		race_intro.pilot_left(id)
 	var r: Dictionary = rivals_node.rivals.get(id, {})
 	if not r.is_empty() and race_mode and state == State.PLAYING:
 		_show_toast("%s LEFT THE RACE" % str(r["name"]).to_upper(), Color(0.75, 0.78, 0.85))
@@ -2160,12 +2150,23 @@ func _on_net_error(message: String) -> void:
 
 
 func _on_room_updated(room: Dictionary) -> void:
-	if not is_inside_tree() or not race_pending.is_empty() or not mp_screen.visible or race_mode:
+	if not is_inside_tree() or not race_pending.is_empty() or race_mode:
 		return
 	if room.is_empty():
-		_show_mp_join()
-	else:
-		_show_mp_lobby()
+		# Left (or lost) the room: back to the create / join screen.
+		if is_instance_valid(room_screen):
+			room_screen.queue_free()
+			room_screen = null
+			_room_return = false
+			if not profile_ui.screen.visible:
+				_show_menu()
+				_open_multiplayer()
+		elif mp_screen.visible:
+			_show_mp_join()
+	elif is_instance_valid(room_screen):
+		room_screen.set_room(room, Net.my_id)  # (kept up to date even while you're in the hangar)
+	elif mp_screen.visible:
+		_show_mp_lobby()  # just created / joined a room
 
 
 # Multiplayer screens ------------------------------------------------------------------
@@ -2201,6 +2202,7 @@ func _make_multiplayer_ui() -> void:
 
 func _open_multiplayer() -> void:
 	menu.visible = false
+	mode_menu.visible = false  # (it stayed showing behind the join screen)
 	mp_screen.visible = true
 	if not Profile.is_account():
 		_show_mp_need_account()
@@ -2332,47 +2334,39 @@ func _show_mp_need_account() -> void:
 	b.grab_focus()
 
 
-## The room: share the code, see who's in, host starts the race.
+## In a room: the ready-up screen (everyone's ship and pilot, Ready / Hangar / Shop / Leave).
 func _show_mp_lobby() -> void:
-	var room := Net.room
-	_clear_mp()
-	_mp_label("ROOM  %s" % str(room.get("code", "????")), 44, Color(1, 0.75, 0.35))
-	_mp_label("Share this code with friends so they can join.", 16, Color(0.8, 0.84, 0.92))
+	mp_screen.visible = false
+	menu.visible = false
+	mode_menu.visible = false
+	if not is_instance_valid(room_screen):
+		room_screen = RaceIntro.new()
+		room_screen.ready_toggled.connect(func(on: bool) -> void: Net.send_ready(on))
+		room_screen.hangar_pressed.connect(_visit_from_room.bind("hangar"))
+		room_screen.shop_pressed.connect(_visit_from_room.bind("shop"))
+		room_screen.leave_pressed.connect(_leave_room)
+		$UI/Root.add_child(room_screen)
+	room_screen.visible = true
+	room_screen.set_last_results(last_results)
+	room_screen.set_room(Net.room, Net.my_id)
 
-	var players: Array = room.get("players", [])
-	for p in players:
-		var id := int(p.get("id", 0))
-		var tags: Array[String] = []
-		if id == int(room.get("host", -1)):
-			tags.append("host")
-		if id == Net.my_id:
-			tags.append("you")
-		var text := str(p.get("name", "Pilot")) + ("  (%s)" % ", ".join(tags) if not tags.is_empty() else "")
-		_mp_label(text, 22, Color.html(str(p.get("color", "#ffffff"))))
 
-	if not last_results.is_empty():
-		var podium: Array[String] = []
-		for row in last_results:
-			if row is Dictionary:
-				podium.append("%d. %s" % [int(row.get("rank", 0)), str(row.get("name", "?"))])
-		_mp_label("Last race:  " + "   ".join(podium), 15, Color(1, 0.85, 0.45))
+## Hangar / Shop from the room: you're not ready while you're in there; closing it brings
+## you back to the room (with your new build on your pad).
+func _visit_from_room(page: String) -> void:
+	Net.send_ready(false)
+	room_screen.visible = false
+	_room_return = true
+	_open_profile_page(page, "mp")
 
-	var min_players := int(room.get("min", 2))
-	var enough := players.size() >= min_players
-	mp_status = _mp_label("", 15, Color(0.8, 0.84, 0.92))
-	var first: Button = null
-	if Net.is_host():
-		var start := _mp_button("Start Race", Net.start_race)
-		start.disabled = not enough
-		first = start
-		if enough:
-			_set_mp_status("%d pilots ready. Start when everyone's in!" % players.size(), Color(0.45, 1, 0.6))
-		else:
-			_set_mp_status("Waiting for at least %d pilots…" % min_players, Color(0.9, 0.85, 0.5))
-	else:
-		_set_mp_status("Waiting for the host to start the race…", Color(0.9, 0.85, 0.5))
-	var leave := _mp_button("Leave Room", _close_multiplayer)
-	(first if first and not first.disabled else leave).grab_focus()
+
+func _leave_room() -> void:
+	Net.leave_room()
+	if is_instance_valid(room_screen):
+		room_screen.queue_free()
+		room_screen = null
+	_show_menu()
+	_open_multiplayer()
 
 
 # --- Accounts, hangar, shop, rewards ------------------------------------------------
@@ -2531,6 +2525,14 @@ func _open_profile_page(page: String, track := "sp") -> void:
 
 ## Leaving Hangar / Shop goes back to that mode's sub-menu; other pages to the main menu.
 func _on_profile_closed() -> void:
+	if _room_return:
+		_room_return = false
+		if Net.in_room() and is_instance_valid(room_screen):
+			_show_mp_lobby()
+		else:
+			_show_menu()
+			_open_multiplayer()
+		return
 	if Profile.mode == "":
 		_show_menu()
 		_open_profile_page("account", "sp")  # logged out / account deleted: back to the login screen
