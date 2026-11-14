@@ -64,7 +64,7 @@ const SHIPS := {
 }
 const CORE_HALF := 31.0
 ## Missiles mounted on the rocket (smaller than the ones in flight).
-const MISSILE_SIZE := 0.62
+const MISSILE_SIZE := 0.52
 const NOZ_HALF := 36.0
 const NOSE_ROW := 8
 const WINDOW_ROW := 112

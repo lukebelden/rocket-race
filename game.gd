@@ -5,7 +5,7 @@ const Obstacle := preload("res://obstacle.gd")
 const Station := preload("res://station.gd")
 const Rocket := preload("res://rocket.gd")
 ## How big the player's rocket is drawn in flight (on top of the ship type's own size).
-const ROCKET_SCALE := 1.35
+const ROCKET_SCALE := 1.6
 const PlanetNode := preload("res://planet.gd")
 const StarLayer := preload("res://star_layer.gd")
 const ModInfo := preload("res://mods.gd")
@@ -2959,8 +2959,8 @@ func _draw() -> void:
 			draw_polyline(trail, Color(1, 0.7, 0.35, 0.45), 3.0)
 		var vel: Vector2 = m["vel"]
 		draw_set_transform(m["pos"], vel.angle() + PI / 2.0)
-		draw_colored_polygon(PackedVector2Array([Vector2(-2.5, 12.5), Vector2(2.5, 12.5), Vector2(0, 22 + randf() * 6)]), Color(1, 0.7, 0.25))
-		Rocket.draw_missile(self, Vector2.ZERO, 1.3)
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.2, 11), Vector2(2.2, 11), Vector2(0, 20 + randf() * 6)]), Color(1, 0.7, 0.25))
+		Rocket.draw_missile(self, Vector2.ZERO, 1.15)
 	draw_set_transform(Vector2.ZERO)
 
 
