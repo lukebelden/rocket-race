@@ -401,6 +401,8 @@ func _process(delta: float) -> void:
 
 	_update_tips(delta)
 	_update_pilot_cards()
+	# Music in menus only (main menu, hangar, shop, the multiplayer room): not on the pad or in flight.
+	Sound.music(state == State.MENU)
 	# Engine rumble while the rocket is flying (louder when boosting).
 	Sound.engine(rocket.flame_on and (state == State.INTRO or state == State.PLAYING), rocket.boosting)
 	if hangar_bg and hangar_bg.visible != (state == State.MENU):

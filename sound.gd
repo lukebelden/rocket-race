@@ -17,6 +17,15 @@ var _engine: AudioStreamPlayer
 var _engine_target := 0.0  # 0 = silent, 1 = cruising, 1.6 = boosting
 var _engine_level := 0.0
 var _engine_seen := 0.0  # seconds since the game last asked for the engine
+## Music plays in menus only: the game switches it off on the launch pad and in flight.
+var _music_on := true
+var _music_level := 1.0
+const MUSIC_DB := -2.0
+
+
+## Menu music on / off (fades, and picks up where it left off).
+func music(on: bool) -> void:
+	_music_on = on
 
 
 ## Called every frame by the game while the rocket flies: on = engine running.
@@ -26,6 +35,12 @@ func engine(on: bool, boosting := false) -> void:
 
 
 func _process(delta: float) -> void:
+	_music_level = move_toward(_music_level, 1.0 if _music_on else 0.0, delta * 1.2)
+	if _music and _music.stream:
+		var silent := _music_level <= 0.01
+		if _music.stream_paused != silent:
+			_music.stream_paused = silent
+		_music.volume_db = MUSIC_DB + linear_to_db(maxf(_music_level, 0.001))
 	# The game stops asking when paused / on menus: fade the rumble out.
 	_engine_seen += delta
 	if _engine_seen > 0.2 or get_tree().paused:
@@ -55,7 +70,7 @@ func _ready() -> void:
 		_players.append(p)
 	_music = AudioStreamPlayer.new()
 	_music.bus = BUS_MUSIC
-	_music.volume_db = -2.0
+	_music.volume_db = MUSIC_DB
 	add_child(_music)
 	_build_sounds()
 	# Engine rumble: a looping player the game turns up/down every frame while flying.
