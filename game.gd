@@ -12,7 +12,7 @@ const ModInfo := preload("res://mods.gd")
 const ModIcon := preload("res://mod_icon.gd")
 const Rivals := preload("res://rivals.gd")
 const ProfileUI := preload("res://profile_ui.gd")
-const Animals := preload("res://animals.gd")
+const Pilots := preload("res://pilots.gd")
 const PauseInput := preload("res://pause_input.gd")
 const PilotCard := preload("res://pilot_card.gd")
 const HangarBG := preload("res://hangar_bg.gd")
@@ -2377,7 +2377,8 @@ func _make_profile_ui() -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 8)
-	profile_avatar = Animals.new()
+	profile_avatar = Pilots.new()
+	profile_avatar.crop = 0.6  # head and shoulders
 	profile_avatar.custom_minimum_size = Vector2(44, 44)
 	row.add_child(profile_avatar)
 	profile_label = Label.new()

@@ -6,7 +6,7 @@ extends Control
 
 signal ready_pressed
 
-const Animals := preload("res://animals.gd")
+const Pilots := preload("res://pilots.gd")
 const Palette := preload("res://palette.gd")
 const SLOTS := 4
 const STAGGER := 0.45  # seconds between panels appearing
@@ -35,6 +35,7 @@ func setup(players: Array, ready_timeout: float) -> void:
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP  # nothing behind it can be clicked
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # crisp pixel pilot feeds
 	_font = ThemeDB.fallback_font
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
@@ -210,28 +211,29 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 		Sound.play("dock", 1.3 + i * 0.08, -6.0)
 	var hatch := _draw_rocket(r, Color(color, alpha), open, alpha)
 
-	# Pilot popping out of the hatch: pops up with a bounce, paws on the rim, waves hello.
+	# Pilot on the hatch's porthole screen: the feed pops on with a bounce, scanlines over it.
 	if pop > 0.01:
 		var hr: float = hatch["r"]
 		var c: Vector2 = hatch["c"]
-		var head_r := hr * 0.78 * pop
-		var head := c + Vector2(0, -hr * 0.42 * pop)
-		var ready := _ready_ids.has(id)
-		var mood := "happy" if ready else ("excited" if t < 1.6 else "normal")
-		var blink := fmod(_t + _blink[i], 3.5) < 0.12
-		Animals.draw_face(self, head, head_r, str(p["character"]), mood, blink)
-		var paw := Animals.fur(str(p["character"]))
-		var wave := 0.0
-		if t > 1.0 and t < 2.4 and _exit_t < 0.0:
-			wave = sin((t - 1.0) * 14.0) * 0.5
-		for s in [-1.0, 1.0]:
-			var pp: Vector2 = c + Vector2(s * hr * 0.62, hr * 0.42)
-			if s > 0.0 and wave != 0.0:  # right paw waves above the rim
-				pp = c + Vector2(hr * 0.95, -hr * 0.35) + Vector2.from_angle(-PI / 2.0 + wave) * hr * 0.25
-			draw_circle(pp, hr * 0.2 * pop, paw)
-			draw_circle(pp + Vector2(0, hr * 0.03), hr * 0.11 * pop, paw.lightened(0.25))
-		# The rim in front of the pilot's chest, so they look like they're leaning out.
-		draw_arc(c, hr * 1.02, 0.15, PI - 0.15, 24, Color(Palette.INDIGO, alpha), hr * 0.16)
+		var pr := hr * 0.92 * minf(pop, 1.08)
+		var tex := Pilots.pixel_texture(str(p["character"]), 36)
+		var src := Pilots.source_rect(tex.get_size(), Vector2.ONE)
+		var ts := tex.get_size()
+		var pts := PackedVector2Array()
+		var uvs := PackedVector2Array()
+		for k in 32:
+			var a := TAU * k / 32.0
+			var d := Vector2(cos(a), sin(a))
+			pts.append(c + d * pr)
+			uvs.append((src.position + (d * 0.5 + Vector2(0.5, 0.5)) * src.size) / ts)
+		var flick := 0.93 + 0.07 * sin(_t * 29.0 + i)
+		draw_colored_polygon(pts, Color(flick, flick, flick, alpha), uvs, tex)
+		var y := c.y - pr
+		while y < c.y + pr:  # scanlines, clipped to the circle
+			var dx := sqrt(maxf(pr * pr - (y - c.y) * (y - c.y), 0.0))
+			draw_line(Vector2(c.x - dx, y), Vector2(c.x + dx, y), Color(0, 0, 0, 0.28 * alpha), 1.0)
+			y += 3.0
+		draw_arc(c, pr, 0.0, TAU, 40, Color(Palette.INK, alpha), maxf(hr * 0.1, 2.0))
 
 	# Name plate (and YOU tag), then the READY stamp.
 	var name_y := r.end.y - 36.0

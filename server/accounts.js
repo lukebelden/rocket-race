@@ -165,9 +165,9 @@ function loadProfile(row) {
 
 function toUser(row) {
   const user = { id: row.id, username: row.username, email: row.email || "", admin: !!row.is_admin, profile: loadProfile(row) };
-  // A dev-only pilot (Penguin) on a non-admin account (e.g. admin removed) falls back to Duck.
+  // A dev-only pilot (Titan) on a non-admin account (e.g. admin removed) falls back to Falcon.
   const c = progress.catalog.characters.find((x) => x.id === user.profile.character);
-  if (c && c.dev && !user.admin) user.profile.character = "duck";
+  if (c && c.dev && !user.admin) user.profile.character = "falcon";
   return user;
 }
 

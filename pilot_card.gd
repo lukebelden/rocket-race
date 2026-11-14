@@ -1,18 +1,19 @@
 extends Control
-## HUD pilot card: an animal pilot in a headset, sitting at a little console inside a
-## rounded box, with their name on the console's nameplate. Your own card sits bottom right
-## (big = true); in races the other pilots get smaller cards bottom left.
+## HUD pilot monitor: a gunmetal console screen showing a live pixel feed of the pilot, with
+## scanlines, a LIVE light, signal bars and a status readout. Your own monitor sits bottom
+## right (big = true); in races the other pilots get smaller monitors bottom left.
 ##
-## The pilot reacts: base_mood follows what's happening every frame (boosting -> excited,
-## low hull -> worried, crashed -> out), and react() shows a mood for a moment (a hit,
+## The feed reacts: base_mood follows what's happening every frame (boosting -> "excited",
+## low hull -> "worried", crashed -> "out"), and react() shows a mood for a moment (a hit,
 ## a level up, docking).
 
-const Animals := preload("res://animals.gd")
+const Pilots := preload("res://pilots.gd")
 const Palette := preload("res://palette.gd")
 
-var animal: String = "duck"
+## Pilot id (name kept from the animal-pilot days).
+var animal: String = Pilots.DEFAULT
 var pilot_name: String = ""
-var accent: Color = Color(0.45, 0.8, 1.0)
+var accent: Color = Color("e8892b")
 var big: bool = true
 ## "" or a short badge in the top corner, e.g. "1st" or "OUT".
 var badge: String = ""
@@ -21,22 +22,29 @@ var base_mood: String = "normal"
 var _mood: String = "normal"
 var _mood_time := 0.0
 var _t := 0.0
-var _blink_at := 1.5
-var _shake := 0.0
+var _glitch := 0.0
 var _font: Font
-## Fixed little star field behind the pilot (the cockpit window).
-var _stars: Array[Vector3] = []
+
+const METAL := Color("2a2e35")
+const METAL_HI := Color("4b525d")
+const METAL_LO := Color("14161a")
+const PHOSPHOR := Color("06120f")
+const STATUS := {
+	"normal": ["NOMINAL", Color("7ed6a0")],
+	"happy": ["NOMINAL", Color("7ed6a0")],
+	"excited": ["BOOST", Color("ffc56b")],
+	"worried": ["HULL LOW", Color("ef6a5a")],
+	"hurt": ["IMPACT", Color("ef6a5a")],
+	"out": ["OFFLINE", Color("8fa6b0")],
+}
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # crisp pixel feed
 	_font = ThemeDB.fallback_font
-	custom_minimum_size = Vector2(190, 152) if big else Vector2(116, 108)
+	custom_minimum_size = Vector2(196, 166) if big else Vector2(118, 112)
 	size = custom_minimum_size
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash(pilot_name + animal)
-	for i in (14 if big else 9):
-		_stars.append(Vector3(rng.randf(), rng.randf(), rng.randf_range(0.6, 1.6)))
 
 
 ## Show a mood for a moment ("hurt", "happy", ...), then go back to base_mood.
@@ -44,16 +52,14 @@ func react(mood: String, seconds := 1.2) -> void:
 	_mood = mood
 	_mood_time = seconds
 	if mood == "hurt":
-		_shake = 0.35
+		_glitch = 0.45
 
 
 func _process(delta: float) -> void:
 	_t += delta
-	_shake = maxf(_shake - delta, 0.0)
+	_glitch = maxf(_glitch - delta, 0.0)
 	if _mood_time > 0.0:
 		_mood_time -= delta
-	if _t > _blink_at + 0.14:
-		_blink_at = _t + randf_range(2.0, 4.5)
 	queue_redraw()
 
 
@@ -68,110 +74,157 @@ func _draw() -> void:
 	var h := size.y
 	var m := mood()
 	var out := m == "out"
+	var pad := 8.0 if big else 5.0
+	var foot := 26.0 if big else 18.0  # nameplate strip under the screen
 
-	# Rounded box.
-	var box := StyleBoxFlat.new()
-	box.bg_color = Color(Palette.INK, 0.92)
-	box.border_color = accent if not out else Palette.SLATE
-	box.set_border_width_all(2)
-	box.set_corner_radius_all(16)
-	draw_style_box(box, Rect2(Vector2.ZERO, size))
+	# Bezel: chamfered gunmetal plate with a bevel and an accent stripe on top.
+	var ch := 10.0 if big else 6.0
+	var plate := PackedVector2Array([Vector2(ch, 0), Vector2(w - ch, 0), Vector2(w, ch), Vector2(w, h - ch),
+		Vector2(w - ch, h), Vector2(ch, h), Vector2(0, h - ch), Vector2(0, ch)])
+	draw_colored_polygon(plate, METAL)
+	draw_polyline(PackedVector2Array([plate[6], plate[7], plate[0], plate[1]]), METAL_HI, 2.0)
+	draw_polyline(PackedVector2Array([plate[2], plate[3], plate[4], plate[5]]), METAL_LO, 2.0)
+	draw_rect(Rect2(ch + 4, 2, w - ch * 2 - 8, 2), accent if not out else Palette.SLATE)
+	if big:
+		for p in [Vector2(6, 6), Vector2(w - 6, 6), Vector2(6, h - 6), Vector2(w - 6, h - 6)]:
+			draw_circle(p, 2.6, METAL_LO)
+			draw_line(p + Vector2(-1.6, -1.0), p + Vector2(1.6, 1.0), METAL_HI, 1.0)
 
-	# Cockpit window behind the pilot, with stars drifting past.
-	var win := Rect2(8, 8, w - 16, h * 0.62)
-	var glass := StyleBoxFlat.new()
-	glass.bg_color = Palette.TEAL_DEEP
-	glass.set_corner_radius_all(11)
-	draw_style_box(glass, win)
-	for s in _stars:
-		var x := win.position.x + fmod(s.x * win.size.x + _t * 6.0 * s.z, win.size.x)
-		var y := win.position.y + 4.0 + s.y * (win.size.y - 8.0)
-		draw_circle(Vector2(x, y), s.z * 0.8, Color(Palette.MIST, 0.3 + 0.4 * absf(sin(_t * s.z + s.x * 9.0))))
-
-	var desk_y := h * 0.66  # top edge of the console
-	var r := h * 0.19
-	var bob := 0.0 if out else sin(_t * 2.2) * 1.4
-	var shake := Vector2(randf_range(-2.5, 2.5), randf_range(-1.5, 1.5)) * (_shake / 0.35) if _shake > 0.0 else Vector2.ZERO
-	var head := Vector2(w / 2.0, desk_y - r * 1.3 + bob) + shake
+	# Screen.
+	var scr := Rect2(pad, pad + 3, w - pad * 2, h - pad * 2 - foot - 3)
+	draw_rect(scr.grow(2), METAL_LO)
+	draw_rect(scr, PHOSPHOR)
+	var tex := Pilots.pixel_texture(animal, 44 if big else 30)
+	var src := Rect2(Vector2.ZERO, tex.get_size())
+	# Square feed of the pilot; on the big monitor a telemetry column fills the rest.
+	var feed := Rect2(scr.position, Vector2(scr.size.y, scr.size.y))
+	if not big:
+		feed.position.x = scr.get_center().x - scr.size.y / 2.0
+	var full := scr
+	scr = feed
+	var flicker := 0.94 + 0.06 * sin(_t * 31.0) * sin(_t * 7.3)
+	var tint := Color(0.92, 1.0, 0.97) * flicker
 	if out:
-		head += Vector2(r * 0.15, r * 0.25)  # slumped
+		tint = Color(0.25, 0.3, 0.3)
+	elif _glitch > 0.0:
+		tint = Color(1.5, 0.55, 0.5)
+	elif m == "worried" and fmod(_t, 0.8) < 0.4:
+		tint = Color(1.25, 0.85, 0.7)
+	tint.a = 1.0
+	if _glitch > 0.0 and not out:
+		# Hit: the feed tears into sideways-shifted slices.
+		var slices := 6
+		for i in slices:
+			var sy := src.size.y / slices
+			var dy := scr.size.y / slices
+			var off := randf_range(-8.0, 8.0) * (_glitch / 0.45)
+			draw_texture_rect_region(tex, Rect2(scr.position.x + off, scr.position.y + dy * i, scr.size.x, dy),
+				Rect2(src.position.x, src.position.y + sy * i, src.size.x, sy), tint)
+	else:
+		draw_texture_rect_region(tex, scr, src, tint)
+	if out:
+		# No signal: static snow.
+		var cell := 4.0 if big else 3.0
+		var y := scr.position.y
+		while y < scr.end.y:
+			var x := scr.position.x
+			while x < scr.end.x:
+				if randf() < 0.45:
+					draw_rect(Rect2(x, y, cell, cell), Color(1, 1, 1, randf_range(0.08, 0.35)))
+				x += cell
+			y += cell
 
-	# Seat back, then shoulders in a flight suit (the card's colour).
-	var seat := StyleBoxFlat.new()
-	seat.bg_color = Palette.SLATE
-	seat.set_corner_radius_all(int(r * 0.5))
-	draw_style_box(seat, Rect2(head.x - r * 1.35, head.y - r * 0.2, r * 2.7, desk_y - head.y + r * 0.4))
-	var suit := accent.darkened(0.35) if not out else Palette.SLATE
-	var body := PackedVector2Array([
-		Vector2(head.x - r * 1.15, desk_y + 2), Vector2(head.x - r * 1.0, head.y + r * 0.9),
-		Vector2(head.x - r * 0.45, head.y + r * 0.72), Vector2(head.x + r * 0.45, head.y + r * 0.72),
-		Vector2(head.x + r * 1.0, head.y + r * 0.9), Vector2(head.x + r * 1.15, desk_y + 2)])
-	draw_colored_polygon(body, suit)
-	draw_colored_polygon(Animals._ellipse(head + Vector2(0, r * 0.86), r * 0.62, r * 0.2), accent if not out else Palette.SLATE)  # scarf
-	draw_colored_polygon(PackedVector2Array([head + Vector2(r * 0.2, r * 0.86), head + Vector2(r * 0.75, r * 1.05),
-		head + Vector2(r * 0.62, r * 1.3), head + Vector2(r * 0.12, r * 1.05)]), (accent if not out else Palette.SLATE).darkened(0.15))
-	draw_circle(head + Vector2(-r * 0.62, r * 1.12), r * 0.12, Palette.AMBER)  # badge
+	scr = full
+	if big:
+		_telemetry(Rect2(feed.end.x + 4, scr.position.y + 20, scr.end.x - feed.end.x - 8, scr.size.y - 24), m)
+	else:
+		draw_rect(Rect2(scr.position, Vector2(feed.position.x - scr.position.x, scr.size.y)), Color(1, 1, 1, 0.03))
+		draw_rect(Rect2(Vector2(feed.end.x, scr.position.y), Vector2(scr.end.x - feed.end.x, scr.size.y)), Color(1, 1, 1, 0.03))
 
-	Animals.draw_face(self, head, r, animal, m, _t >= _blink_at and _t < _blink_at + 0.13)
+	# CRT: scanlines, a slow rolling bright band, darker edges.
+	var line_y := scr.position.y
+	while line_y < scr.end.y:
+		draw_rect(Rect2(scr.position.x, line_y, scr.size.x, 1), Color(0, 0, 0, 0.32))
+		line_y += 3.0
+	var band_y := scr.position.y + fmod(_t * 28.0, scr.size.y + 30.0) - 15.0
+	draw_rect(Rect2(scr.position.x, clampf(band_y, scr.position.y, scr.end.y), scr.size.x,
+		clampf(band_y + 10.0, scr.position.y, scr.end.y) - clampf(band_y, scr.position.y, scr.end.y)), Color(0.6, 1.0, 0.85, 0.06))
+	for i in 4:
+		var e := float(i + 1) * 2.0
+		draw_rect(scr.grow(-e + 2.0), Color(0, 0, 0, 0.09), false, 2.0)
 
-	# Headset: band over the head, ear cups, and a mic in front of the mouth.
-	var band := Palette.INK
-	draw_arc(head, r * 1.06, PI * 1.08, PI * 1.92, 16, band, maxf(r * 0.13, 2.0))
-	for s in [-1.0, 1.0]:
-		var cup := head + Vector2(s * r * 1.0, r * 0.05)
-		draw_colored_polygon(Animals._ellipse(cup, r * 0.17, r * 0.27), band)
-		draw_colored_polygon(Animals._ellipse(cup, r * 0.09, r * 0.17), accent if not out else Palette.SLATE)
-	draw_polyline(PackedVector2Array([head + Vector2(r * 1.0, r * 0.25), head + Vector2(r * 0.85, r * 0.62),
-		head + Vector2(r * 0.42, r * 0.66)]), band, maxf(r * 0.06, 1.5))
-	draw_circle(head + Vector2(r * 0.38, r * 0.66), r * 0.08, Palette.INK)
+	# Overlays on the glass: LIVE light, signal bars, warnings.
+	var fs := 11 if big else 9
+	var live_on := fmod(_t, 1.2) < 0.75 and not out
+	draw_circle(Vector2(scr.position.x + 8, scr.position.y + 8), 3.0 if big else 2.2, Color("ef3b3b") if live_on else Color("5a1e1e"))
+	if big:
+		draw_string(_font, Vector2(scr.position.x + 14, scr.position.y + 12), "LIVE", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.75))
+	for i in 4:
+		var strength := 0 if out else (3 if m == "hurt" else 4)
+		var on := i < strength and not (m == "hurt" and randf() < 0.3)
+		var bh := 3.0 + i * 2.5
+		draw_rect(Rect2(scr.end.x - 26 + i * 5, scr.position.y + 15 - bh, 3, bh), Color("7ed6a0") if on else Color(1, 1, 1, 0.15))
+	if out:
+		_center(Vector2(scr.get_center().x, scr.get_center().y + 4), "SIGNAL LOST", fs + (3 if big else 1),
+			Color("ef6a5a") if fmod(_t, 1.0) < 0.6 else Color("8a3a33"))
+	elif m == "worried" and fmod(_t, 0.8) < 0.4:
+		draw_rect(Rect2(scr.position.x, scr.end.y - (16 if big else 12), scr.size.x, 12 if big else 9), Color(0.94, 0.42, 0.35, 0.75))
+		_center(Vector2(scr.get_center().x, scr.end.y - (10 if big else 7.5)), "WARNING", fs - 1, Color.WHITE)
 
-	# The console in front: desk top, front panel with blinking lights and a little screen.
-	var desk := PackedVector2Array([Vector2(6, desk_y), Vector2(w - 6, desk_y), Vector2(w - 2, h - 6), Vector2(2, h - 6)])
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = Palette.INDIGO
-	panel.corner_radius_bottom_left = 14
-	panel.corner_radius_bottom_right = 14
-	draw_style_box(panel, Rect2(2, desk_y, w - 4, h - desk_y - 2))
-	draw_rect(Rect2(6, desk_y - 3, w - 12, 6), Palette.SLATE)  # desk lip
-	var lights := [Palette.ORANGE, Palette.AMBER, Palette.AQUA]
-	for i in 3:
-		var on := fmod(_t * (1.3 + i * 0.7) + i, 2.0) < 1.2 and not out
-		draw_circle(Vector2(14 + i * 9, desk_y + 12), 2.6, lights[i] if on else lights[i].darkened(0.7))
-	var screen := Rect2(w - 34, desk_y + 7, 24, 11)
-	draw_rect(screen, Palette.TEAL_DEEP if not out else Palette.INK)
-	for i in 3:
-		var bar := 3.0 + 6.0 * absf(sin(_t * 3.0 + i)) if not out else 1.5
-		draw_rect(Rect2(screen.position.x + 3 + i * 7, screen.end.y - 1 - bar, 4, bar), Palette.AQUA if not out else Palette.BAD)
-
-	# Paws resting on the desk (on the controls when excited).
-	var paw := Animals.fur(animal)
-	var reach := 0.0 if m != "excited" else sin(_t * 18.0) * 1.5
-	for s in [-1.0, 1.0]:
-		var p := Vector2(head.x + s * r * 0.85, desk_y + 1 + reach * s)
-		draw_colored_polygon(Animals._ellipse(p, r * 0.27, r * 0.18), paw)
-		draw_colored_polygon(Animals._ellipse(p + Vector2(0, r * 0.03), r * 0.16, r * 0.08), paw.lightened(0.25))
-
-	# Nameplate.
-	var size_px := 15 if big else 12
-	var text := pilot_name.left(14)
-	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
-	var plate := Rect2(w / 2.0 - tw / 2.0 - 7, h - 6 - size_px - 9, tw + 14, size_px + 6)
-	var ps := StyleBoxFlat.new()
-	ps.bg_color = Palette.INK
-	ps.set_corner_radius_all(5)
-	ps.border_color = (accent if not out else Palette.SLATE).darkened(0.2)
-	ps.set_border_width_all(1)
-	draw_style_box(ps, plate)
-	draw_string(_font, Vector2(plate.position.x + 7, plate.end.y - 4), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px,
-		accent.lightened(0.3) if not out else Palette.TEXT_DIM)
+	# Nameplate strip: pilot name left, status right.
+	var name_y := h - pad - 6.0
+	var st: Array = STATUS.get(m, STATUS["normal"])
+	var name_fs := 14 if big else 11
+	draw_string(_font, Vector2(pad + 2, name_y), pilot_name.to_upper().left(12), HORIZONTAL_ALIGNMENT_LEFT, -1, name_fs,
+		Color("e6f1ee") if not out else Color("8fa6b0"))
+	if big:
+		var label: String = st[0]
+		var lw := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_rect(Rect2(w - pad - lw - 10, name_y - fs - 3, lw + 8, fs + 6), Color(st[1], 0.18))
+		draw_string(_font, Vector2(w - pad - lw - 6, name_y - 1), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, st[1])
+	else:
+		draw_circle(Vector2(w - pad - 4, name_y - 4), 3.0, st[1])
 
 	# Badge (race place / OUT / FINISHED) in the top corner.
 	if badge != "":
-		var bs := 12 if big else 11
-		var bw := _font.get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, bs).x + 12
-		var br := Rect2(w - bw - 10, 12, bw, bs + 6)
-		var bstyle := StyleBoxFlat.new()
-		bstyle.bg_color = Palette.BAD if badge == "OUT" else Palette.AMBER
-		bstyle.set_corner_radius_all(6)
-		draw_style_box(bstyle, br)
-		draw_string(_font, Vector2(br.position.x + 6, br.end.y - 4), badge, HORIZONTAL_ALIGNMENT_LEFT, -1, bs, Palette.INK)
+		var bs := 12 if big else 10
+		var bw := _font.get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, bs).x + 10
+		var br := Rect2(w - bw - 4, -6, bw, bs + 6)
+		draw_rect(br, Palette.BAD if badge == "OUT" else Color("ffc56b"))
+		draw_string(_font, Vector2(br.position.x + 5, br.end.y - 4), badge, HORIZONTAL_ALIGNMENT_LEFT, -1, bs, METAL_LO)
+
+
+## Vital signs beside the feed: heart rate, oxygen and a running ECG trace.
+func _telemetry(r: Rect2, m: String) -> void:
+	var green := Color("7ed6a0")
+	var amber := Color("ffc56b")
+	var red := Color("ef6a5a")
+	if m == "out":
+		draw_string(_font, r.position + Vector2(0, 10), "HR ---", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("8fa6b0"))
+		draw_line(Vector2(r.position.x, r.end.y - 12), Vector2(r.end.x, r.end.y - 12), red, 1.0)
+		return
+	var bpm: int = int({"excited": 128, "worried": 112, "hurt": 140, "happy": 92}.get(m, 84)) + int(sin(_t * 0.7) * 3.0)
+	var col: Color = green if bpm < 105 else (amber if bpm < 125 else red)
+	draw_string(_font, r.position + Vector2(0, 10), "HR %d" % bpm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+	var o2 := 97 if m != "worried" else 91
+	draw_string(_font, r.position + Vector2(0, 24), "O2 %d%%" % o2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, green if o2 > 94 else amber)
+	# ECG: flat line with a beat spike, scrolling left.
+	var base := r.end.y - 14.0
+	var pts := PackedVector2Array()
+	var period := 60.0 / float(bpm)
+	var x := 0.0
+	while x <= r.size.x:
+		var ph := fmod(_t - x / 70.0, period) / period
+		var y := 0.0
+		if ph < 0.06:
+			y = -10.0 * sin(ph / 0.06 * PI)
+		elif ph < 0.1:
+			y = 4.0 * sin((ph - 0.06) / 0.04 * PI)
+		pts.append(Vector2(r.position.x + x, base + y))
+		x += 2.0
+	draw_polyline(pts, Color(col, 0.9), 1.0)
+
+
+func _center(c: Vector2, text: String, fs: int, color: Color) -> void:
+	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	draw_string(_font, Vector2(c.x - tw / 2.0, c.y + fs * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)

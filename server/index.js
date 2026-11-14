@@ -452,7 +452,7 @@ function addPlayer(room, client) {
     ws: client.ws,
     client,
     name: cleanName(client.username),
-    character: client.character || "duck",
+    character: client.character || "falcon",
     color: freeColor(room),
     status: "lobby",
     d: 0,

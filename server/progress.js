@@ -19,6 +19,9 @@ const SHIPS = byId(catalog.ships);
 const MODS = byId(catalog.mods);
 const DESIGNS = byId(catalog.designs);
 const CHARACTERS = byId(catalog.characters);
+// Profiles from before the crew change had animal pilots: give them a new pilot.
+const OLD_CHARACTERS = { duck: "falcon", mouse: "echo", dog: "torque", cat: "scarlet", bear: "grizzly", raccoon: "viper", monkey: "rivet", penguin: "titan" };
+const DEFAULT_CHARACTER = "falcon";
 const TABLES = { ships: SHIPS, mods: MODS, designs: DESIGNS };
 
 /** XP needed to go from `level` to the next one. */
@@ -48,7 +51,7 @@ function newTrack() {
 
 function newProfile() {
   return {
-    character: "duck",
+    character: DEFAULT_CHARACTER,
     sp: newTrack(),
     mp: newTrack(),
     stats: { sp_runs: 0, sp_best: 0, mp_races: 0, mp_wins: 0, mp_best: 0 },
@@ -89,7 +92,8 @@ function sanitize(input, { allowMp = true, checkLevels = false } = {}) {
       stats: input.stats,
     };
   }
-  p.character = CHARACTERS[input.character] && !(checkLevels && CHARACTERS[input.character].dev) ? input.character : "duck";
+  const wanted = CHARACTERS[input.character] ? input.character : OLD_CHARACTERS[input.character];
+  p.character = wanted && !(checkLevels && CHARACTERS[wanted].dev) ? wanted : DEFAULT_CHARACTER;
   p.sp = cleanTrack(input.sp, checkLevels);
   p.mp = allowMp ? cleanTrack(input.mp, checkLevels) : newTrack();
   const stats = input.stats || {};

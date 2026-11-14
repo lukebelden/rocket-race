@@ -6,7 +6,7 @@ extends Node
 
 signal closed
 
-const Animals := preload("res://animals.gd")
+const Pilots := preload("res://pilots.gd")
 const ModIcon := preload("res://mod_icon.gd")
 const ModInfo := preload("res://mods.gd")
 const Rocket := preload("res://rocket.gd")
@@ -190,8 +190,8 @@ func _swatch(design: Dictionary) -> Control:
 
 
 func _avatar(id: String) -> Control:
-	var a := Animals.new()
-	a.animal = id
+	var a := Pilots.new()
+	a.pilot = id
 	return a
 
 

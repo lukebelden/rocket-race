@@ -1,4 +1,6 @@
 extends Node
+
+const Pilots := preload("res://pilots.gd")
 ## Player profile (autoload "Profile"): guest or account, levels, credits, unlocks, loadout.
 ##
 ## Single player ("sp") and multiplayer ("mp") are separate tracks: each has its own XP and
@@ -53,7 +55,7 @@ func new_track() -> Dictionary:
 
 
 func new_profile() -> Dictionary:
-	return {"character": "duck", "sp": new_track(), "mp": new_track(),
+	return {"character": "falcon", "sp": new_track(), "mp": new_track(),
 		"stats": {"sp_runs": 0, "sp_best": 0, "mp_races": 0, "mp_wins": 0, "mp_best": 0}}
 
 
@@ -127,7 +129,7 @@ func design(t: String) -> Dictionary:
 
 
 func character() -> String:
-	return str(data.get("character", "duck"))
+	return Pilots.id_of(str(data.get("character", Pilots.DEFAULT)))
 
 
 ## Pilots you can pick: everyone gets the normal ones; dev-only pilots only for devs.
@@ -183,7 +185,7 @@ func _clean_loadout(tr: Dictionary, want: Dictionary) -> Dictionary:
 ## Accept a profile from the server or disk (also upgrades the older single-wallet shape).
 func _clean_profile(src: Dictionary) -> Dictionary:
 	if src.has("owned") and not (src.get("sp", {}) as Dictionary).has("owned"):
-		src = {"character": src.get("loadout", {}).get("character", "duck"),
+		src = {"character": Pilots.id_of(str(src.get("loadout", {}).get("character", Pilots.DEFAULT))),
 			"sp": {"xp": src.get("sp", {}).get("xp", 0), "credits": src.get("credits", 0),
 				"owned": src["owned"], "loadout": src.get("loadout", {})},
 			"mp": {"xp": src.get("mp", {}).get("xp", 0)}, "stats": src.get("stats", {})}
