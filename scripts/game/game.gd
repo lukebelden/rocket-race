@@ -496,7 +496,7 @@ func _show_menu() -> void:
 	best_label.visible = false  # best score is shown in the Single Player menu
 	_update_profile_line()
 	if profile_ui and profile_ui.screen:
-		profile_ui.screen.visible = false
+		profile_ui.hide_all()
 	score_label.visible = false
 	level_label.visible = false
 	dashboard.visible = false
@@ -2111,7 +2111,7 @@ func _on_race_started(course_seed: int, _ready_timeout: float) -> void:
 	race_pending = {"seed": course_seed}
 	last_results = []
 	if is_instance_valid(room_screen):
-		if profile_ui.screen.visible:
+		if profile_ui.is_open():
 			profile_ui.close()
 		room_screen.visible = true
 		room_screen.play_exit()
@@ -2181,7 +2181,7 @@ func _on_room_updated(room: Dictionary) -> void:
 			room_screen.queue_free()
 			room_screen = null
 			_room_return = false
-			if not profile_ui.screen.visible:
+			if not profile_ui.is_open():
 				_show_menu()
 				_open_multiplayer()
 		elif mp_screen.visible:
@@ -2367,6 +2367,7 @@ func _show_mp_lobby() -> void:
 		room_screen.ready_toggled.connect(func(on: bool) -> void: Net.send_ready(on))
 		room_screen.hangar_pressed.connect(_visit_from_room.bind("hangar"))
 		room_screen.shop_pressed.connect(_visit_from_room.bind("shop"))
+		room_screen.mods_pressed.connect(_visit_from_room.bind("fit"))
 		room_screen.leave_pressed.connect(_leave_room)
 		$UI/Root.add_child(room_screen)
 	room_screen.visible = true
@@ -2404,6 +2405,8 @@ func _make_profile_ui() -> void:
 	hangar_bg = HangarBG.new()
 	$UI/Root.add_child(hangar_bg)
 	$UI/Root.move_child(hangar_bg, cockpit.get_index() + 1)  # covers the cockpit view in menus
+	profile_ui.stage = hangar_bg  # the Hangar screen stands this rocket in its middle column
+	profile_ui.launch_pressed.connect(_go_to_pad)
 
 	var vbox := start_button.get_parent()
 	# Who's flying: avatar + name + levels, under the title.
@@ -2518,7 +2521,7 @@ Best score: %d" % maxi(int(best_score), int(Profile.data["stats"]["sp_best"]))
 	bar.value = int(info["into"]) if int(info["need"]) > 0 else bar.max_value
 	mbox.add_child(bar)
 	var specs := [
-		["Launch" if track == "sp" else "Race Online", _go_to_pad if track == "sp" else _open_multiplayer],
+		["Launch" if track == "sp" else "Race Online", _preflight if track == "sp" else _open_multiplayer],
 		["Hangar", _open_profile_page.bind("hangar", track)],
 		["Shop", _open_profile_page.bind("shop", track)],
 		["Back", _show_menu],
@@ -2534,6 +2537,14 @@ Best score: %d" % maxi(int(best_score), int(Profile.data["stats"]["sp_best"]))
 		if first == null:
 			first = b
 	first.grab_focus()
+
+
+## Single Player Launch: pick your starting mods first (if you own any), then the pad.
+func _preflight() -> void:
+	if (Profile.track("sp")["owned"]["mods"] as Array).is_empty():
+		_go_to_pad()
+	else:
+		_open_profile_page("fit", "sp")
 
 
 func _open_profile_page(page: String, track := "sp") -> void:

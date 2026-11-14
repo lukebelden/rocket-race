@@ -12,6 +12,7 @@ extends Control
 signal ready_toggled(on: bool)
 signal hangar_pressed
 signal shop_pressed
+signal mods_pressed
 signal leave_pressed
 
 const Pilots := preload("res://scripts/ui/pilots.gd")
@@ -73,6 +74,7 @@ func _ready() -> void:
 	_bar.offset_bottom = -40
 	add_child(_bar)
 	_bar_button("Hangar", 150, func() -> void: hangar_pressed.emit())
+	_bar_button("Mods", 150, func() -> void: mods_pressed.emit())
 	_bar_button("Shop", 150, func() -> void: shop_pressed.emit())
 	_ready_button = _bar_button("READY!", 230, _on_ready_pressed)
 	_ready_button.add_theme_font_size_override("font_size", 24)

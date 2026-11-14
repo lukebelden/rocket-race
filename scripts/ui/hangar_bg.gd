@@ -3,7 +3,8 @@ extends Control
 ## a bright haze shaft with a big round light behind the rocket, misty far tanks and pipes,
 ## dark catwalks with warm capsule lamps, near pipes in silhouette, and your rocket on its
 ## lit launch platform - with the ship, paint and mods from the hangar of the mode you're in.
-## Landscape: rocket on the left, menu on the right. Portrait: rocket on top, menu below.
+## Landscape: rocket on the left, menu on the right (in the Hangar screen: in its middle
+## column, see set_focus_x). Portrait: rocket on top, menu below.
 
 const Rocket := preload("res://scripts/game/rocket.gd")
 const Palette := preload("res://scripts/game/palette.gd")
@@ -12,6 +13,8 @@ var rocket: Area2D
 var _t := 0.0
 var _ship_size := 1.0
 var _motes: Array[Vector3] = []
+## Hangar screen: stand the rocket here (x in this control) instead of the usual spot. -1 = off.
+var _focus_x := -1.0
 
 
 func _ready() -> void:
@@ -48,6 +51,14 @@ func show_loadout(track: String) -> void:
 	_layout()
 
 
+## The full-screen Hangar puts the rocket in its middle column; -1 returns it to the menu spot.
+func set_focus_x(x: float) -> void:
+	if is_equal_approx(x, _focus_x):
+		return
+	_focus_x = x
+	_layout()
+
+
 func _portrait() -> bool:
 	return size.y > size.x
 
@@ -56,7 +67,8 @@ func _portrait() -> bool:
 func _spot() -> Dictionary:
 	if _portrait():
 		return {"x": size.x * 0.5, "floor": size.y * 0.37, "scale": size.y / 1152.0 * 2.6 * _ship_size}
-	return {"x": size.x * 0.27, "floor": size.y * 0.82, "scale": size.y / 648.0 * 3.6 * _ship_size}
+	return {"x": _focus_x if _focus_x >= 0.0 else size.x * 0.27, "floor": size.y * 0.82,
+		"scale": size.y / 648.0 * 3.6 * _ship_size}
 
 
 func _layout() -> void:

@@ -5,6 +5,8 @@ extends Node
 ## unlocks (by that mode's level) and loadout.
 
 signal closed
+## Launch! on the single-player pre-flight page: game.gd takes you to the launch pad.
+signal launch_pressed
 
 const Pilots := preload("res://scripts/ui/pilots.gd")
 const ModIcon := preload("res://scripts/ui/mod_icon.gd")
@@ -18,6 +20,10 @@ const GOOD := Color(0.45, 1, 0.6)
 const BAD := Color(1, 0.6, 0.45)
 
 var screen: Control
+## Full-screen layer for the Hangar (the other pages use the centred panel in `screen`).
+var wide: Control
+## The hangar backdrop (hangar_bg.gd): told where to stand the rocket in the Hangar.
+var stage: Control
 var box: VBoxContainer
 var status: Label
 var _page: String = ""
@@ -47,8 +53,17 @@ func setup(template: Control) -> void:
 	for child in box.get_children():
 		box.remove_child(child)
 		child.free()
+	wide = Control.new()
+	wide.name = "HangarScreen"
+	wide.visible = false
+	wide.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_sibling(wide)
+	wide.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	wide.resized.connect(func() -> void:
+		if wide.visible:
+			_render())  # landscape <-> portrait
 	Profile.changed.connect(func() -> void:
-		if screen.visible and not _busy and _page in ["hangar", "shop", "pick"]:
+		if is_open() and not _busy and _page in ["hangar", "shop", "pick", "fit"]:
 			_render())
 
 
@@ -57,26 +72,47 @@ func open(page: String, track := "sp") -> void:
 	_track = track
 	_pick = Profile.character()
 	_scroll_box = null
-	screen.visible = true
+	screen.visible = page != "hangar"
+	wide.visible = page == "hangar"
+	if page != "hangar" and stage:
+		stage.set_focus_x(-1.0)
 	_render()
 
 
-func close() -> void:
+func is_open() -> bool:
+	return screen.visible or wide.visible
+
+
+## Hide without emitting closed (the game moves on to something else).
+func hide_all() -> void:
 	screen.visible = false
+	wide.visible = false
+	if stage:
+		stage.set_focus_x(-1.0)
+
+
+func close() -> void:
+	hide_all()
 	closed.emit()
 
 
 func _render() -> void:
 	_scroll_keep = _scroll_box.scroll_vertical if _scroll_box and is_instance_valid(_scroll_box) else 0
 	_scroll_box = null
-	for child in box.get_children():
-		box.remove_child(child)
-		child.queue_free()
+	# Hangar columns scroll on their own: keep each one's position across re-renders.
+	var keep_cols: Array[int] = []
+	for s in wide.find_children("*", "ScrollContainer", true, false):
+		keep_cols.append((s as ScrollContainer).scroll_vertical)
+	for parent in [box, wide]:
+		for child in parent.get_children():
+			parent.remove_child(child)
+			child.queue_free()
 	status = null
 	match _page:
 		"account": _render_account()
 		"signup": _render_signup()
 		"hangar": _render_hangar()
+		"fit": _render_fit()
 		"shop": _render_shop()
 		"pick": _render_pick()
 		"forgot": _render_forgot()
@@ -84,6 +120,15 @@ func _render() -> void:
 		"password": _render_password()
 		"delete": _render_delete()
 		"report": _render_report()
+	var cols := wide.find_children("*", "ScrollContainer", true, false)
+	if cols.size() == keep_cols.size():
+		for i in cols.size():
+			var s := cols[i] as ScrollContainer
+			var v := keep_cols[i]
+			if v > 0:  # restore once laid out (the range is 0 until then)
+				s.get_v_scroll_bar().changed.connect(func() -> void:
+					if is_instance_valid(s):
+						s.scroll_vertical = v, CONNECT_ONE_SHOT)
 
 
 # --- Little builders -------------------------------------------------------------------
@@ -560,52 +605,201 @@ func _render_report() -> void:
 	msg.grab_focus()
 
 
-# --- Hangar: pilot, ship, paint, fitted mods ---------------------------------------------
+# --- Hangar: full screen. Pilot | Ship type | your rocket (the backdrop) | Customization ---
 
+## Full-screen layout over the hangar backdrop (the centred panel is hidden for this page).
+## The middle column is left open: the backdrop's rocket stands there on its platform.
 func _render_hangar() -> void:
-	_label("%s HANGAR" % ("SINGLE PLAYER" if _track == "sp" else "MULTIPLAYER"), 34, GOLD)
-	var lo := Profile.loadout(_track)
-	var inner := _scroll(470)
-	_rocket_preview(inner)
+	var view := screen.get_viewport_rect().size
+	var portrait := view.y > view.x
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 16)
+	wide.add_child(margin)
+	var page := VBoxContainer.new()
+	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page.add_theme_constant_override("separation", 10)
+	margin.add_child(page)
+	_outlined(_label("%s HANGAR" % ("SINGLE PLAYER" if _track == "sp" else "MULTIPLAYER"), 32, GOLD, page))
 
-	_label("PILOT", 17, GOLD, inner)
-	var pilots := _flow(inner)
+	if portrait:
+		# Phones: the backdrop puts the rocket on top; the three sections scroll below it.
+		if stage:
+			stage.set_focus_x(-1.0)
+		var gap := Control.new()
+		gap.custom_minimum_size.y = view.y * 0.3
+		gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		page.add_child(gap)
+		var scroll := ScrollContainer.new()
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		page.add_child(scroll)
+		_scroll_box = scroll
+		var list := VBoxContainer.new()
+		list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.add_theme_constant_override("separation", 10)
+		scroll.add_child(list)
+		_fill_pilots(_column(list, 0.0), false)
+		_fill_ships(_column(list, 0.0), false)
+		_fill_custom(_column(list, 0.0), false)
+		status = _label("", 15, SOFT, page)
+		var b := _button("Back", close, page, 220)
+		b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		b.grab_focus()
+		return
+
+	var cols := HBoxContainer.new()
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	cols.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cols.add_theme_constant_override("separation", 14)
+	page.add_child(cols)
+	_fill_pilots(_column(cols, 1.0), true)
+	_fill_ships(_column(cols, 0.95), true)
+	var middle := VBoxContainer.new()
+	middle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	middle.size_flags_stretch_ratio = 1.5
+	middle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cols.add_child(middle)
+	var air := Control.new()
+	air.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	air.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	middle.add_child(air)
+	_outlined(_label("%s  ·  %s" % [str(Profile.ship(_track).get("name", "Ship")),
+		str(Profile.design(_track).get("name", ""))], 18, Color("ffbf5a"), middle))
+	status = _label("", 15, SOFT, middle)
+	_outlined(status)
+	var back := _button("Back", close, middle, 220)
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.grab_focus()
+	_fill_custom(_column(cols, 1.0), true)
+	if stage:
+		middle.resized.connect(func() -> void:
+			if is_instance_valid(middle) and is_instance_valid(stage):
+				stage.set_focus_x(middle.get_global_rect().get_center().x - stage.get_global_rect().position.x))
+
+
+func _outlined(label: Label) -> void:
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	label.add_theme_constant_override("outline_size", 8)
+
+
+## One hangar section: a panel taking `ratio` of the width (0 = full width in portrait).
+func _column(parent: Control, ratio: float) -> VBoxContainer:
+	var panel := PanelContainer.new()
+	if ratio > 0.0:
+		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.size_flags_stretch_ratio = ratio
+		panel.custom_minimum_size.x = 190
+	parent.add_child(panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	panel.add_child(v)
+	return v
+
+
+## Cards area of a section: a scrolling grid in landscape columns, a flow in portrait.
+func _column_body(col: VBoxContainer, tall: bool, per_row: int) -> Container:
+	if not tall:
+		return _flow(col)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(scroll)
+	var grid := GridContainer.new()
+	grid.columns = per_row
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	scroll.add_child(grid)
+	return grid
+
+
+func _fill_pilots(col: VBoxContainer, tall: bool) -> void:
+	_label("PILOT", 20, GOLD, col)
+	_label(Profile.character_name(Profile.character()), 15, SOFT, col)
+	var body := _column_body(col, tall, 2)
 	for c in Profile.characters():
 		var id := str(c["id"])
-		_card(pilots, str(c["name"]), "", Profile.character() == id, false,
+		var b := _card(body, str(c["name"]), "", Profile.character() == id, false,
 			func() -> void: Profile.set_character(id), _avatar(id))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(90, 146)
+		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(68, 98)  # portrait
 
-	_label("SHIP", 17, GOLD, inner)
-	var ships := _flow(inner)
+
+func _fill_ships(col: VBoxContainer, tall: bool) -> void:
+	_label("SHIP TYPE", 20, GOLD, col)
+	_label(str(Profile.ship(_track).get("desc", "")), 13, SOFT, col)
+	var body := _column_body(col, tall, 1)
+	var lo := Profile.loadout(_track)
 	for s in Profile.items("ships"):
 		var id := str(s["id"])
 		var owned := Profile.owns(_track, "ships", id)
-		var note := "%d slot%s" % [s["slots"], "" if int(s["slots"]) == 1 else "s"] if owned else "Shop · Lvl %d" % int(s["level"])
-		_card(ships, str(s["name"]), note, lo["ship"] == id, not owned,
+		var note: String
+		if owned:
+			note = "%d mod slot%s\nAgility %s   Armour %s" % [s["slots"], "" if int(s["slots"]) == 1 else "s",
+				_pips(float(s.get("agility", 1.0)), 0.8, 1.25), _pips(1.0 / float(s.get("damage", 1.0)), 1.0 / 1.3, 1.0 / 0.7)]
+		else:
+			note = "Locked · Shop · Lvl %d" % int(s["level"])
+		var b := _card(body, str(s["name"]), note, lo["ship"] == id, not owned,
 			func() -> void: Profile.set_loadout(_track, {"ship": id}))
-	_label(str(Profile.ship(_track).get("desc", "")), 14, SOFT, inner)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(170, 84)
 
-	_label("PAINT", 17, GOLD, inner)
-	var paints := _flow(inner)
+
+## A stat as 1-3 filled pips between lo and hi.
+func _pips(v: float, lo: float, hi: float) -> String:
+	var n := clampi(1 + roundi((v - lo) / maxf(hi - lo, 0.001) * 2.0), 1, 3)
+	return "■".repeat(n) + "□".repeat(3 - n)
+
+
+func _fill_custom(col: VBoxContainer, tall: bool) -> void:
+	_label("CUSTOMIZATION", 20, GOLD, col)
+	_label("Paint", 15, SOFT, col)
+	var body := _column_body(col, tall, 2)
+	var lo := Profile.loadout(_track)
 	for d in Profile.items("designs"):
 		var id := str(d["id"])
 		var owned := Profile.owns(_track, "designs", id)
-		_card(paints, str(d["name"]), "" if owned else "Shop", lo["design"] == id, not owned,
+		var b := _card(body, str(d["name"]), "" if owned else "Shop", lo["design"] == id, not owned,
 			func() -> void: Profile.set_loadout(_track, {"design": id}), _swatch(d))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(90, 108)
 
+
+# --- Pre-flight: fit starting mods (opened by Launch, or Mods in a multiplayer room) ---------
+
+func _render_fit() -> void:
+	_label("PRE-FLIGHT CHECK", 36, GOLD)
+	var lo := Profile.loadout(_track)
 	var slots := int(Profile.ship(_track).get("slots", 1))
-	_label("STARTING MODS  (%d / %d slots)" % [(lo["mods"] as Array).size(), slots], 17, GOLD, inner)
+	_label("%s  ·  %d / %d mod slots fitted" % [str(Profile.ship(_track).get("name", "Ship")),
+		(lo["mods"] as Array).size(), slots], 17, Color("ffbf5a"))
+	_rocket_preview(box)
 	var owned_mods: Array = Profile.track(_track)["owned"]["mods"]
 	if owned_mods.is_empty():
-		_label("Buy mods in the Shop to start every run with them fitted.\n(Stations still offer random mods during a run.)", 14, DIM, inner)
+		_label("No mods yet. Buy them in the Shop to start with them fitted.\n(Stations still offer random mods during a run.)", 14, DIM)
 	else:
-		var flow := _flow(inner)
+		_label("Choose the mods you start with:", 15, SOFT)
+		var flow := _flow(box)
+		flow.custom_minimum_size.x = 560
 		for id in owned_mods:
 			var fitted: bool = (lo["mods"] as Array).has(id)
 			_card(flow, str(ModInfo.MODS[id]["name"]), "Fitted" if fitted else "", fitted, false,
 				_toggle_mod.bind(str(id)), _mod_art(str(id)))
 	status = _label("", 15, SOFT)
-	_button("Back", close).grab_focus()
+	var r := _row()
+	var go: Button
+	if _track == "sp":
+		go = _button("Launch!", func() -> void:
+			hide_all()
+			launch_pressed.emit(), r, 220)
+	else:
+		go = _button("Done", close, r, 220)
+	_button("Back", close, r, 150)
+	go.grab_focus()
 
 
 func _toggle_mod(id: String) -> void:
@@ -706,7 +900,7 @@ func _buy(kind: String, id: String, title: String) -> void:
 	if err != "":
 		_set_status(err, BAD)
 	else:
-		_set_status("Bought %s! Fit it in the Hangar." % title, GOOD)
+		_set_status("Bought %s! Fit it at your next pre-flight check." % title, GOOD)
 
 
 # --- Choose your pilot (new players, or "Change Pilot") -------------------------------------
