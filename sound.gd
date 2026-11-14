@@ -44,17 +44,10 @@ func _process(delta: float) -> void:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # menus make sounds while the game is paused
 	_make_buses()
-	# Every button in the game clicks.
-	get_tree().node_added.connect(func(n: Node) -> void:
-		# (Buttons moved to a new parent are "added" again: only connect once.)
-		var click := play.bind("click")
-		if n is BaseButton and not n.pressed.is_connected(click):
-			n.pressed.connect(click)
-			# Soft tick when the mouse moves onto a button (or keyboard focus lands on it).
-			n.mouse_entered.connect(_hover.bind(n))
-			n.focus_entered.connect(func() -> void:
-				if _keyboard_nav:  # arrows / Tab / gamepad, not a click or a menu opening
-					_hover(n)))
+	# Every button in the game clicks: ones added from now on, plus the main scene's own
+	# buttons (those are already in the tree before this autoload starts listening).
+	get_tree().node_added.connect(_hook_button)
+	_hook_all.call_deferred(get_tree().root)
 	for i in 8:
 		var p := AudioStreamPlayer.new()
 		p.bus = BUS_SFX
@@ -96,6 +89,26 @@ func set_volume(bus: String, volume: float) -> void:
 		return
 	AudioServer.set_bus_mute(idx, volume <= 0.001)
 	AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(volume, 0.001)))
+
+
+## Give a button its click + hover sounds (once: buttons moved to a new parent are
+## "added" again).
+func _hook_button(n: Node) -> void:
+	if not n is BaseButton or n.has_meta("_sound_hooked"):
+		return
+	n.set_meta("_sound_hooked", true)
+	n.pressed.connect(play.bind("click"))
+	# Soft tick when the mouse moves onto a button (or keyboard focus lands on it).
+	n.mouse_entered.connect(_hover.bind(n))
+	n.focus_entered.connect(func() -> void:
+		if _keyboard_nav:  # arrows / Tab / gamepad, not a click or a menu opening
+			_hover(n))
+
+
+func _hook_all(node: Node) -> void:
+	_hook_button(node)
+	for child in node.get_children():
+		_hook_all(child)
 
 
 ## Hover tick: only for buttons you can press, and never twice within a blink (mouse
