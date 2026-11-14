@@ -268,12 +268,12 @@ func _render_account() -> void:
 		_label("PILOT PROFILE", 40, GOLD)
 		var top := _row()
 		var av := _avatar(Profile.character())
-		av.custom_minimum_size = Vector2(76, 112)  # full-body pilot
+		av.custom_minimum_size = Vector2(76, 108)  # pilot portrait
 		top.add_child(av)
 		var names := VBoxContainer.new()
 		names.custom_minimum_size.x = 360  # give the name/email room (a column inside a row gets no width otherwise)
 		top.add_child(names)
-		_label(Profile.username, 28, Color(0.55, 0.85, 1), names, false)
+		_label(Profile.username, 28, Color("ffbf5a"), names, false)
 		_label(Profile.email if Profile.email != "" else "No email set (needed to reset your password)", 14,
 			DIM if Profile.email != "" else BAD, names, false)
 		_xp_bar(box, "Single Player", int(Profile.data["sp"]["xp"]))
@@ -590,7 +590,7 @@ func _toggle_mod(id: String) -> void:
 func _render_shop() -> void:
 	var mode_name := "Single Player" if _track == "sp" else "Multiplayer"
 	_label("%s SHOP" % mode_name.to_upper(), 34, GOLD)
-	_label("Credits: %d   ·   %s level %d" % [Profile.credits(_track), mode_name, Profile.level(_track)], 18, Color(0.55, 0.85, 1))
+	_label("Credits: %d   ·   %s level %d" % [Profile.credits(_track), mode_name, Profile.level(_track)], 18, Color("ffbf5a"))
 	if not Profile.shop_open(_track):
 		_label("This shop opens at %s level %d.\n%s" % [mode_name, int(Profile.catalog["shop_level"]),
 			"Fly some runs to earn XP!" if _track == "sp" else "Race to earn Multiplayer XP!"], 17, SOFT)
@@ -630,7 +630,7 @@ func _shop_row(parent: Control, it: Dictionary) -> void:
 			var slots := int(it.get("slots", 1))
 			art.draw.connect(func() -> void:
 				for i in slots:  # one square per mod slot
-					art.draw_rect(Rect2(6 + i * 17, 20, 14, 14), Color(0.55, 0.85, 1), false, 2.0))
+					art.draw_rect(Rect2(6 + i * 17, 20, 14, 14), Color("ffbf5a"), false, 2.0))
 	art.custom_minimum_size = Vector2(56, 56)
 	row.add_child(art)
 	var text := VBoxContainer.new()
@@ -679,14 +679,14 @@ func _render_pick() -> void:
 	_label("CHOOSE YOUR PILOT", 38, GOLD)
 	_label("Who's flying? You can change this any time in the Hangar.", 16, SOFT)
 	var flow := _flow(box)
-	flow.custom_minimum_size.x = 620
+	flow.custom_minimum_size.x = 640  # 5 pilots per row
 	for c in Profile.characters():
 		var id := str(c["id"])
 		var b := _card(flow, str(c["name"]), "", _pick == id, false, func() -> void:
 			_pick = id
 			_render(), _avatar(id))
-		b.custom_minimum_size = Vector2(130, 196)
-		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(96, 150)  # tall = full-body pilot
+		b.custom_minimum_size = Vector2(118, 186)
+		(b.get_child(0).get_child(0) as Control).custom_minimum_size = Vector2(90, 138)  # portrait
 	var go := _button("Let's Fly as %s!" % Profile.character_name(_pick), func() -> void:
 		Profile.needs_pilot_pick = false
 		Profile.set_character(_pick)

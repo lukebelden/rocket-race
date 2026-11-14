@@ -187,6 +187,7 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 	panel.border_color = Color(color, alpha * (0.5 if empty else 1.0))
 	panel.set_border_width_all(3)
 	panel.set_corner_radius_all(18)
+	panel.corner_detail = 1  # chamfered, like the rest of the UI
 	draw_style_box(panel, r)
 	if empty:
 		_draw_rocket(r, Color(Palette.SLATE, alpha), 0.0, alpha)
@@ -243,6 +244,7 @@ func _draw_slot(i: int, rect: Rect2, p: Dictionary) -> void:
 		var tag := StyleBoxFlat.new()
 		tag.bg_color = Color(Palette.AMBER, alpha)
 		tag.set_corner_radius_all(6)
+		tag.corner_detail = 1  # chamfered, like the rest of the UI
 		draw_style_box(tag, Rect2(r.position.x + 12, r.position.y + 12, 46, 22))
 		_center_text("YOU", Vector2(r.position.x + 35, r.position.y + 22), 14, Color(Palette.INK, alpha))
 	if gone:
@@ -301,6 +303,7 @@ func _plate(c: Vector2, text: String, color: Color, alpha: float) -> void:
 	box.border_color = Color(color, alpha)
 	box.set_border_width_all(2)
 	box.set_corner_radius_all(8)
+	box.corner_detail = 1  # chamfered, like the rest of the UI
 	draw_style_box(box, Rect2(c.x - tw / 2.0 - 12, c.y - 15, tw + 24, 30))
 	draw_string(_font, Vector2(c.x - tw / 2.0, c.y + 6), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(color.lightened(0.35), alpha))
 
@@ -318,6 +321,7 @@ func _stamp(c: Vector2, s: float, alpha: float) -> void:
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color(Palette.AQUA, 0.95 * alpha)
 	box.set_corner_radius_all(8)
+	box.corner_detail = 1  # chamfered, like the rest of the UI
 	draw_style_box(box, Rect2(-46, -16, 92, 32))
 	var tw := _font.get_string_size("READY", HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	draw_string(_font, Vector2(-tw / 2.0, 7), "READY", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(Palette.INK, alpha))

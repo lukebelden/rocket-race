@@ -289,6 +289,13 @@ func _ready() -> void:
 	_update_layout()
 	get_window().size_changed.connect(_update_layout)
 	rocket.booster_lost.connect(_on_booster_lost)
+	# Instrument look: the fuel and hull gauges are cut into segments.
+	for bar: ProgressBar in [boost_bar, hull_bar]:
+		bar.draw.connect(func() -> void:
+			var x := 9.0
+			while x < bar.size.x - 2.0:
+				bar.draw_rect(Rect2(x, 1, 2, bar.size.y - 2), Color("16191e"))
+				x += 11.0)
 	fuel_label.text = "BOOST FUEL" if touch_ui else "BOOST FUEL  [W / Shift]"
 	dashboard.visible = false
 
@@ -912,7 +919,7 @@ func _update_tips(delta: float) -> void:
 
 func _show_tip(text: String, urgent: bool) -> void:
 	tip_title.text = "SHIP COMPUTER · ALERT" if urgent else "SHIP COMPUTER · TIP"
-	tip_title.add_theme_color_override("font_color", Color(1, 0.65, 0.35) if urgent else Color(0.45, 0.8, 1))
+	tip_title.add_theme_color_override("font_color", Color(1, 0.65, 0.35) if urgent else Color("ffbf5a"))
 	tip_text.text = text
 	# Quick fade-in so a new tip catches the eye without being distracting.
 	if _tip_tween and _tip_tween.is_valid():
@@ -1047,7 +1054,7 @@ func _update_dashboard() -> void:
 		hull_bar.max_value = hull_max
 	if not is_equal_approx(hull_bar.value, hull):
 		hull_bar.value = hull
-	var hull_color := Palette.AQUA if hull > 0.6 else (Palette.AMBER if hull > 0.3 else Palette.BAD)
+	var hull_color := Palette.GOOD if hull > 0.6 else (Palette.AMBER if hull > 0.3 else Palette.BAD)
 	_set_fill(hull_bar, hull_color)
 	_set_label(hull_label, "HULL INTEGRITY  %d%%" % roundi(hull * 100.0), hull_color.lightened(0.2))
 	var hull_alpha := 0.55 + 0.45 * absf(sin(clock * 6.0)) if hull <= 0.3 else 1.0
@@ -2258,7 +2265,7 @@ func _show_mp_join() -> void:
 	_mp_label("Race up to 3 friends through the same asteroid field.\nFirst through Level %d wins!" % RACE_LEVELS,
 		16, Color(0.8, 0.84, 0.92))
 
-	_mp_label("Flying as %s  ·  Multiplayer level %d" % [Profile.username, Profile.mp_level()], 18, Color(0.55, 0.85, 1))
+	_mp_label("Flying as %s  ·  Multiplayer level %d" % [Profile.username, Profile.mp_level()], 18, Color("ffbf5a"))
 
 	_mp_buttons.append(_mp_button("Create Room", _on_create_room))
 
@@ -2383,7 +2390,7 @@ func _make_profile_ui() -> void:
 	row.add_child(profile_avatar)
 	profile_label = Label.new()
 	profile_label.add_theme_font_size_override("font_size", 16)
-	profile_label.add_theme_color_override("font_color", Color(0.55, 0.85, 1))
+	profile_label.add_theme_color_override("font_color", Color("ffbf5a"))
 	row.add_child(profile_label)
 	vbox.add_child(row)
 	vbox.move_child(row, best_label.get_index() + 1)
@@ -2477,7 +2484,7 @@ func _open_mode_menu(track: String) -> void:
 Best score: %d" % maxi(int(best_score), int(Profile.data["stats"]["sp_best"]))
 	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	line.add_theme_font_size_override("font_size", 16)
-	line.add_theme_color_override("font_color", Color(0.55, 0.85, 1))
+	line.add_theme_color_override("font_color", Color("ffbf5a"))
 	mbox.add_child(line)
 	var bar := ProgressBar.new()
 	bar.custom_minimum_size = Vector2(300, 12)
@@ -3003,8 +3010,8 @@ func _draw_earth(size: Vector2) -> void:
 	for i in 3:
 		draw_colored_polygon(_circle_points(center, radius + 36.0 - i * 11.0), Color(Palette.MIST, 0.06 + 0.05 * i))
 	# Night oceans: teal, deeper towards the far side.
-	draw_colored_polygon(_circle_points(center, radius), Palette.TEAL)
-	draw_colored_polygon(_circle_points(center + Vector2(radius * 0.06, radius * 0.06), radius * 0.94), Palette.TEAL_DEEP)
+	draw_colored_polygon(_circle_points(center, radius), Color("2c6d6f"))
+	draw_colored_polygon(_circle_points(center + Vector2(radius * 0.06, radius * 0.06), radius * 0.94), Color("1d4249"))
 
 	# Continents: flat shapes in a few muted tones (land, lighter land, sand, snowy peaks).
 	# [angle along the surface, size, shape seed, has desert, has mountains]

@@ -1,33 +1,32 @@
 extends RefCounted
-## Rocket Race palette: minimal flat-vector sci-fi.
-## Darks are indigo/navy, mid tones teal/aqua, and warm orange/amber is used ONLY for
-## lights and important things (buttons you should press, danger, glows). Every shape is
-## flat: one base colour plus one darker shade, no outlines, no gradients. Depth comes from
-## haze: far layers are lighter and greener, near layers darker.
+## Rocket Race palette: gritty sci-fi, matched to the pilot portraits.
+## Darks are gunmetal, mid tones muted steel, and warm orange/amber is used ONLY for lights
+## and important things (buttons you should press, danger, glows). Shapes stay flat: one base
+## colour plus one darker shade. Depth comes from haze: far layers lighter and greyer.
 
 # Darks (backgrounds, silhouettes, panels)
-const INK := Color("12152a")      # deepest: foreground silhouettes, panel backs
-const NAVY := Color("1b2140")
-const INDIGO := Color("262d52")
-const SLATE := Color("36405f")
+const INK := Color("0e1014")      # deepest: foreground silhouettes, panel backs
+const NAVY := Color("16191e")
+const INDIGO := Color("21252c")
+const SLATE := Color("343a44")
 
 # Teals (mid tones, far layers, haze)
-const TEAL_DEEP := Color("1d4249")
-const TEAL := Color("2c6d6f")
-const AQUA := Color("4fb8a8")
-const MIST := Color("a8e2d4")     # brightest haze / light shafts
-const HAZE := Color("5f9c9b")
+const TEAL_DEEP := Color("1f2a2e")
+const TEAL := Color("34494e")
+const AQUA := Color("5fa8a0")
+const MIST := Color("b4c2c0")     # brightest haze / light shafts
+const HAZE := Color("66767a")
 
 # Warm accents (lights, highlights, calls to action)
-const ORANGE := Color("f0893c")
-const AMBER := Color("ffc56b")
-const RUST := Color("b9502c")
+const ORANGE := Color("e8892b")
+const AMBER := Color("ffbf5a")
+const RUST := Color("a8461f")
 
 # Text and status
-const TEXT := Color("e6f1ee")
-const TEXT_DIM := Color("8fa6b0")
-const GOOD := Color("7ed6a0")
-const BAD := Color("ef6a5a")
+const TEXT := Color("e8e6df")
+const TEXT_DIM := Color("8a9199")
+const GOOD := Color("8fcf72")
+const BAD := Color("e5533d")
 
 
 ## A colour pushed back into the haze (0 = unchanged, 1 = fully haze).
