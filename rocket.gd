@@ -63,6 +63,8 @@ const SHIPS := {
 	"hauler": {"h": 365, "boosters": [-71.0, -46.0, 46.0, 71.0], "fin": 113.0, "fin_bare": 60.0, "flame_w": 1.25},
 }
 const CORE_HALF := 31.0
+## Missiles mounted on the rocket (smaller than the ones in flight).
+const MISSILE_SIZE := 0.62
 const NOZ_HALF := 36.0
 const NOSE_ROW := 8
 const WINDOW_ROW := 112
@@ -103,6 +105,7 @@ void fragment() {
 static var _shader: Shader
 var _body: Sprite2D
 var _flame: Sprite2D
+var _back: Node2D
 var _anim: float = 0.0
 
 ## Paint job (shop "designs") and the animal pilot in the window. Set by game.gd from Profile.
@@ -251,15 +254,7 @@ func _draw() -> void:
 		var tc: Color = ModInfo.MODS["thruster"]["color"]
 		draw_line(Vector2(-NOZ_HALF * SPRITE_SCALE - 1, NOZZLE_Y), Vector2(NOZ_HALF * SPRITE_SCALE + 1, NOZZLE_Y), tc, 2.5)
 
-	# Missile Pod: a pylon wing on each fin tip with a missile hung on its outer side
-	# (left one fires first; both pylons stay, empty, when you're out of missiles).
-	if mods.has("missile"):
-		var fin: float = float(g["fin"] if has_booster else g["fin_bare"]) * SPRITE_SCALE + 1.5
-		for i in 2:
-			var s := -1.0 if i == 0 else 1.0
-			_draw_pylon(fin * s, s)
-			if missile_count > 1 - i:
-				draw_missile(self, Vector2(fin * s + s * 4.6, 13.0), 0.95)
+	_back.queue_redraw()  # missiles, tucked behind the boosters
 
 	# Radar: a thin mast on the nose tip with a blinking light, plus a little side antenna
 	# (round mount, rod, light tip) sticking out of the nose cone.
@@ -270,9 +265,9 @@ func _draw() -> void:
 		draw_line(Vector2(0, nose + 1), Vector2(0, nose - 12), Color("6b7682"), 1.4)
 		draw_line(Vector2(-0.35, nose + 1), Vector2(-0.35, nose - 12), Color("a9b5c1"), 0.6)
 		if on:
-			draw_circle(Vector2(0, nose - 13.5), 4.0, Color(rc, 0.25))
-		draw_rect(Rect2(-1.6, nose - 15.5, 3.2, 3.6), rc if on else rc.darkened(0.55))
-		draw_rect(Rect2(-1.6, nose - 15.5, 1.4, 3.6), Color(1, 1, 1, 0.35 if on else 0.15))
+			draw_circle(Vector2(0, nose - 13.2), 2.8, Color(rc, 0.25))
+		draw_circle(Vector2(0, nose - 13.2), 1.4, rc if on else rc.darkened(0.55))
+		draw_circle(Vector2(-0.45, nose - 13.65), 0.5, Color(1, 1, 1, 0.6 if on else 0.2))
 		var base := _px(-15, NOSE_ROW + 30)
 		var tip := base + Vector2(-5.5, -9.0)
 		draw_line(base, tip, Color("6b7682"), 1.3)
@@ -336,6 +331,10 @@ func _make_sprites() -> void:
 	_flame.show_behind_parent = true
 	_flame.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	add_child(_flame)
+	_back = Node2D.new()
+	_back.show_behind_parent = true
+	_back.draw.connect(_draw_back)
+	add_child(_back)
 	_body = Sprite2D.new()
 	_body.hframes = FRAMES
 	_body.centered = false
@@ -383,37 +382,39 @@ static func _paint_shader() -> Shader:
 	return _shader
 
 
-## Missile pylon on a fin tip (s = -1 left, +1 right): grey wing plate angled down from the
-## fin, an upright post with a red stripe and red tip, and a mounting bolt.
-func _draw_pylon(x: float, s: float) -> void:
-	var light := Color("a9b5c1")
-	var mid := Color("8794a2")
-	var dark := Color("5f6a77")
-	var red := Color("c8283a")
-	var plate := PackedVector2Array([Vector2(x - s * 3.5, 15), Vector2(x + s * 1.5, 11), Vector2(x + s * 1.5, 25), Vector2(x - s * 3.5, 23)])
-	draw_colored_polygon(plate, mid)
-	draw_colored_polygon(PackedVector2Array([plate[3], plate[2], Vector2(x + s * 1.5, 26.2), Vector2(x - s * 3.5, 24.2)]), dark)
-	draw_line(plate[0], plate[1], light, 1.0)
-	draw_circle(Vector2(x - s * 1.4, 18.5), 1.0, Color("4d5663"))
-	var px := x + s * 1.5
-	draw_rect(Rect2(px - 1.4, 4, 2.8, 22), light)
-	draw_rect(Rect2(px + 0.2, 4, 1.2, 22), dark)
-	draw_rect(Rect2(px - 1.4, 9, 2.8, 8), red)
-	draw_rect(Rect2(px - 1.4, 9, 1.0, 8), red.lightened(0.25))
-	draw_rect(Rect2(px - 1.4, 3, 2.8, 2.2), red.lightened(0.15))
+## Missile Pod: a small missile on each side of the main rocket, tucked behind the outer
+## booster (or behind the core once the boosters drop) so its nose and outer edge peek out.
+## Left one fires first.
+func _draw_back() -> void:
+	if not mods.has("missile"):
+		return
+	var g: Dictionary = SHIPS[_ship_file()]
+	var top := _px(0, BOOST_TOP_ROW).y
+	for i in 2:
+		if missile_count <= 1 - i:
+			continue
+		var s := -1.0 if i == 0 else 1.0
+		var edge: float
+		if has_booster:
+			edge = absf(float(g["boosters"][0])) * SPRITE_SCALE + 2.4
+		else:
+			edge = CORE_HALF * SPRITE_SCALE + 1.6
+		draw_missile(_back, Vector2(edge * s, top + 5.0), MISSILE_SIZE)
 
 
 ## One missile pointing up (-y), centred on `at`: shaded grey body with a rounded nose, two
-## red bands, a centre fin and two dark swept fins. Used on the pylons and in flight.
+## red bands, a centre fin and two grey swept fins with red stripes. Used on the rocket and in flight.
 static func draw_missile(canvas: CanvasItem, at: Vector2, k: float = 1.0) -> void:
 	var light := Color("b9c6d2")
 	var dark := Color("7d8a98")
 	var fin := Color("5b6470")
 	var red := Color("c8283a")
 	var p := func(x: float, y: float) -> Vector2: return at + Vector2(x, y) * k
-	# swept fins (behind the body)
+	# swept fins (behind the body): grey plate, darker lower edge, red stripe near the tip
 	for s in [-1.0, 1.0]:
-		canvas.draw_colored_polygon(PackedVector2Array([p.call(s * 2.6, 3.0), p.call(s * 6.5, 8.5), p.call(s * 6.5, 10.5), p.call(s * 2.6, 9.0)]), fin)
+		canvas.draw_colored_polygon(PackedVector2Array([p.call(s * 2.6, 2.5), p.call(s * 7.0, 7.5), p.call(s * 7.0, 11.0), p.call(s * 2.6, 9.5)]), Color("8794a2"))
+		canvas.draw_colored_polygon(PackedVector2Array([p.call(s * 2.6, 8.4), p.call(s * 7.0, 9.8), p.call(s * 7.0, 11.0), p.call(s * 2.6, 9.5)]), fin)
+		canvas.draw_colored_polygon(PackedVector2Array([p.call(s * 4.6, 4.7), p.call(s * 5.9, 6.2), p.call(s * 5.9, 10.2), p.call(s * 4.6, 9.8)]), red)
 	# body: lit left half, shaded right half, rounded nose
 	var nose := PackedVector2Array()
 	for i in 9:
