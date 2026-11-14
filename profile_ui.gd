@@ -75,6 +75,7 @@ func _render() -> void:
 	status = null
 	match _page:
 		"account": _render_account()
+		"signup": _render_signup()
 		"hangar": _render_hangar()
 		"shop": _render_shop()
 		"pick": _render_pick()
@@ -297,13 +298,12 @@ func _render_account() -> void:
 	_label("PILOT LOGIN", 40, GOLD)
 	_label("Sign up to save your progress online and race friends in Multiplayer." +
 		("\nYour guest progress comes with you." if Profile.is_guest() else ""), 15, SOFT).custom_minimum_size.x = 440
-	_user_edit = _field("Username", "or email to log in", false, 64)
-	_pass_edit = _field("Password", "at least 8 characters", true, 128)
-	_pass_edit.text_submitted.connect(func(_t: String) -> void: _do_login(false))
-	_mail_edit = _field("Email", "sign up only: for password resets", false, 120)
+	_user_edit = _field("Username / email", "", false, 120)
+	_pass_edit = _field("Password", "", true, 128)
+	_pass_edit.text_submitted.connect(func(_t: String) -> void: _do_login())
 	var r3 := _row()
-	_button("Log In", _do_login.bind(false), r3, 150)
-	_button("Sign Up", _do_login.bind(true), r3, 150)
+	_button("Log In", _do_login, r3, 150)
+	_button("Sign Up", func() -> void: open("signup"), r3, 150)
 	_button("Forgot password?", func() -> void:
 		_reset_login = _user_edit.text.strip_edges()
 		_reset_sent = false
@@ -319,25 +319,61 @@ func _render_account() -> void:
 	_user_edit.grab_focus()
 
 
-func _do_login(is_signup: bool) -> void:
+func _do_login() -> void:
 	if _busy:
 		return
 	var user := _user_edit.text.strip_edges()
 	var password := _pass_edit.text
 	if user == "" or password == "":
-		_set_status("Enter a username and password.", BAD)
-		return
-	if is_signup and _mail_edit.text.strip_edges() == "":
-		_set_status("Add an email so you can reset your password if you forget it.", BAD)
+		_set_status("Enter your username or email and your password.", BAD)
 		return
 	_busy = true
-	_set_status("Signing up…" if is_signup else "Logging in…", Color(0.9, 0.85, 0.5))
-	var err: String
-	if is_signup:
-		err = await Profile.signup(user, password, _mail_edit.text.strip_edges())
-	else:
-		err = await Profile.login(user, password)
+	_set_status("Logging in…", Color(0.9, 0.85, 0.5))
+	var err: String = await Profile.login(user, password)
 	_busy = false
+	_after_auth(err)
+
+
+## Create an account: its own page with username, email and password (typed twice).
+func _render_signup() -> void:
+	_label("CREATE ACCOUNT", 38, GOLD)
+	_label("Save your progress online and race friends in Multiplayer." +
+		("\nYour guest progress comes with you." if Profile.is_guest() else ""), 15, SOFT).custom_minimum_size.x = 440
+	_user_edit = _field("Username", "", false, 64)
+	_mail_edit = _field("Email", "for password resets", false, 120)
+	_pass_edit = _field("Password", "at least 8 characters", true, 128)
+	var pw2 := _field("Repeat password", "", true, 128)
+	pw2.text_submitted.connect(func(_t: String) -> void: _do_signup(pw2.text))
+	status = _label("", 15, SOFT)
+	var r := _row()
+	_button("Create Account", func() -> void: _do_signup(pw2.text), r, 190)
+	_button("Back", func() -> void: open("account"), r, 150)
+	_user_edit.grab_focus()
+
+
+func _do_signup(repeat: String) -> void:
+	if _busy:
+		return
+	var user := _user_edit.text.strip_edges()
+	var mail := _mail_edit.text.strip_edges()
+	var password := _pass_edit.text
+	if user == "" or password == "":
+		_set_status("Choose a username and password.", BAD)
+		return
+	if mail == "":
+		_set_status("Add an email so you can reset your password if you forget it.", BAD)
+		return
+	if password != repeat:
+		_set_status("The passwords don't match.", BAD)
+		return
+	_busy = true
+	_set_status("Creating account…", Color(0.9, 0.85, 0.5))
+	var err: String = await Profile.signup(user, password, mail)
+	_busy = false
+	_after_auth(err)
+
+
+func _after_auth(err: String) -> void:
 	if not is_instance_valid(box):
 		return
 	if err != "":
