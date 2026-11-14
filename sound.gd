@@ -49,7 +49,12 @@ func _ready() -> void:
 		# (Buttons moved to a new parent are "added" again: only connect once.)
 		var click := play.bind("click")
 		if n is BaseButton and not n.pressed.is_connected(click):
-			n.pressed.connect(click))
+			n.pressed.connect(click)
+			# Soft tick when the mouse moves onto a button (or keyboard focus lands on it).
+			n.mouse_entered.connect(_hover.bind(n))
+			n.focus_entered.connect(func() -> void:
+				if _keyboard_nav:  # arrows / Tab / gamepad, not a click or a menu opening
+					_hover(n)))
 	for i in 8:
 		var p := AudioStreamPlayer.new()
 		p.bus = BUS_SFX
@@ -91,6 +96,32 @@ func set_volume(bus: String, volume: float) -> void:
 		return
 	AudioServer.set_bus_mute(idx, volume <= 0.001)
 	AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(volume, 0.001)))
+
+
+## Hover tick: only for buttons you can press, and never twice within a blink (mouse
+## enter + focus arriving together, or sweeping fast across a row of buttons).
+var _last_hover := 0
+var _keyboard_nav := false
+
+
+func _input(event: InputEvent) -> void:
+	# Remember whether the player is moving around menus with keys/gamepad or the mouse.
+	if event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion:
+		var nav := event.is_action("ui_up") or event.is_action("ui_down") or event.is_action("ui_left") \
+			or event.is_action("ui_right") or event.is_action("ui_focus_next") or event.is_action("ui_focus_prev")
+		_keyboard_nav = nav and event.is_pressed()
+	elif event is InputEventMouseButton or event is InputEventScreenTouch:
+		_keyboard_nav = false
+
+
+func _hover(button: BaseButton) -> void:
+	if button.disabled or not button.is_visible_in_tree():
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_hover < 60:
+		return
+	_last_hover = now
+	play("hover", randf_range(0.97, 1.03), -3.0)
 
 
 func play(sound_name: String, pitch := 1.0, volume_db := 0.0) -> void:
@@ -200,6 +231,8 @@ func _engine_loop() -> PackedFloat32Array:
 
 func _build_sounds() -> void:
 	_sounds["click"] = _wav(_tone(0.05, 900, 700, "tri", 0.002, 0.35))
+	# Hover: a short, soft rising blip (quieter and higher than the click).
+	_sounds["hover"] = _wav(_mix(_tone(0.035, 1500, 1900, "sine", 0.002, 0.3), _tone(0.03, 3000, 3600, "sine", 0.002, 0.08)))
 	_sounds["beep"] = _wav(_tone(0.14, 660, 660, "square", 0.003, 0.18))
 	_sounds["go"] = _wav(_tone(0.35, 990, 990, "square", 0.003, 0.2))
 	_sounds["launch"] = _wav(_mix(_tone(1.6, 900, 300, "noise", 0.15, 0.45), _tone(1.6, 55, 90, "sine", 0.2, 0.5)))
@@ -223,7 +256,7 @@ func _build_sounds() -> void:
 	# Warning: two quick falling beeps (low fuel / hull damage).
 	_sounds["alarm"] = _wav(_mix(_tone(0.13, 880, 880, "square", 0.003, 0.3), _tone(0.16, 660, 660, "square", 0.003, 0.3), 0.15))
 	# Bring every effect up to the same, clearly audible level.
-	var peaks := {"click": 0.55, "beep": 0.6, "go": 0.65, "coin": 0.6, "pause": 0.6, "alarm": 0.6}
+	var peaks := {"hover": 0.32, "click": 0.55, "beep": 0.6, "go": 0.65, "coin": 0.6, "pause": 0.6, "alarm": 0.6}
 	for key in _sounds:
 		var wav: AudioStreamWAV = _sounds[key]
 		var samples := PackedFloat32Array()
