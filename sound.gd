@@ -299,25 +299,41 @@ func _make_music() -> AudioStreamWAV:
 	var bar := 4.0  # seconds per chord
 	# Am - F - C - G (root frequencies of each chord's notes)
 	var chords := [[220.0, 261.63, 329.63], [174.61, 220.0, 261.63], [261.63, 329.63, 392.0], [196.0, 246.94, 293.66]]
-	var n := int(bar * chords.size() * MUSIC_RATE)
+	var total := bar * chords.size()
+	var n := int(total * MUSIC_RATE)
 	var out := PackedFloat32Array()
 	out.resize(n)
 	var step := 0.5  # arpeggio note length
+	var xfade := 0.6  # seconds the old chord fades out under the new one (no pop at chord changes)
 	for i in n:
 		var t := float(i) / MUSIC_RATE
 		var ci := int(t / bar) % chords.size()
-		var chord: Array = chords[ci]
 		var in_bar := fmod(t, bar)
-		# Pad: soft sine chord, swelling in and out over each bar (so the loop is seamless).
+		# Pad: soft sine chord, swelling over each bar.
 		var swell := sin(PI * in_bar / bar)
-		var pad := 0.0
-		for f in chord:
-			pad += sin(TAU * f * 0.5 * t) + 0.3 * sin(TAU * f * t)
-		pad *= 0.045 * (0.35 + 0.65 * swell)
-		# Arpeggio: chord notes an octave up, each plucked and fading.
+		var pad := _pad(chords[ci], t) * (0.35 + 0.65 * swell)
+		if in_bar < xfade:
+			# Blend from the previous chord. For the first bar that is the last chord at the
+			# end of the loop (t + total), so the loop point is seamless too.
+			var w := 0.5 - 0.5 * cos(PI * in_bar / xfade)
+			var prev_t := t + total if ci == 0 else t
+			# 0.35 = the swell level the old chord ended its bar on.
+			pad = pad * w + _pad(chords[(ci + chords.size() - 1) % chords.size()], prev_t) * 0.35 * (1.0 - w)
+		pad *= 0.045
+		# Arpeggio: chord notes an octave up, each plucked and fading. The short fade-in and
+		# fade-out stop every note from clicking.
+		var chord: Array = chords[ci]
 		var ai := int(in_bar / step)
 		var note: float = chord[ai % chord.size()] * (2.0 if ai % 6 < 3 else 4.0)
 		var at := fmod(in_bar, step)
-		var arp := sin(TAU * note * t) * exp(-at * 6.0) * 0.06
+		var edge := minf(minf(at / 0.008, (step - at) / 0.02), 1.0)
+		var arp := sin(TAU * note * at) * exp(-at * 6.0) * edge * 0.06
 		out[i] = pad + arp
 	return _wav(_norm(out, 0.7), true, MUSIC_RATE)
+
+
+func _pad(chord: Array, t: float) -> float:
+	var s := 0.0
+	for f in chord:
+		s += sin(TAU * f * 0.5 * t) + 0.3 * sin(TAU * f * t)
+	return s

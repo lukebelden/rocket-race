@@ -87,6 +87,12 @@ function serveStatic(req, res) {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "X-Frame-Options": "SAMEORIGIN",
+      // Cross-origin isolation: the web build uses threads (SharedArrayBuffer), which browsers
+      // only allow with these. Threads keep the audio mixing off the main thread, so a stall
+      // (resizing the window, typing) no longer starves it and makes a buzz.
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cross-Origin-Resource-Policy": "same-origin",
     });
     if (req.method === "HEAD") return res.end();
     fs.createReadStream(file).pipe(res);

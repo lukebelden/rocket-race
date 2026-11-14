@@ -289,7 +289,7 @@ func _ready() -> void:
 	_make_radar_overlay()
 	station_footer.pressed.connect(_on_station_footer)
 	_update_layout()
-	get_window().size_changed.connect(_update_layout)
+	get_window().size_changed.connect(_on_window_resized)
 	rocket.booster_lost.connect(_on_booster_lost)
 	# Instrument look: the fuel and hull gauges are cut into segments.
 	for bar: ProgressBar in [boost_bar, hull_bar]:
@@ -441,8 +441,29 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Use a tall base resolution on portrait screens (phones) so things aren't tiny.
+## Dragging the window edge fires size_changed for every pixel. Redoing the whole layout
+## (and rebuilding the star layers) each time stalls the game, and in the web build that
+## starves the audio and you hear a buzz. So wait until the resizing stops, except when the
+## screen flips between portrait and landscape (that needs the new layout straight away).
+var _resize_timer: SceneTreeTimer
+var _layout_portrait := false
+
+
+func _on_window_resized() -> void:
+	var portrait := get_window().size.y > get_window().size.x
+	if portrait != _layout_portrait:
+		_update_layout()
+		return
+	if _resize_timer:
+		_resize_timer.timeout.disconnect(_update_layout)
+	_resize_timer = get_tree().create_timer(0.15, true)
+	_resize_timer.timeout.connect(_update_layout)
+
+
 func _update_layout() -> void:
+	_resize_timer = null
 	var window := get_window()
+	_layout_portrait = window.size.y > window.size.x
 	var portrait := window.size.y > window.size.x
 	window.content_scale_size = Vector2i(648, 1152) if portrait else Vector2i(1152, 648)
 
