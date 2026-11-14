@@ -13,6 +13,32 @@ var _sounds: Dictionary = {}  # name -> AudioStreamWAV
 var _players: Array[AudioStreamPlayer] = []
 var _music: AudioStreamPlayer
 var _next_player := 0
+var _engine: AudioStreamPlayer
+var _engine_target := 0.0  # 0 = silent, 1 = cruising, 1.6 = boosting
+var _engine_level := 0.0
+var _engine_seen := 0.0  # seconds since the game last asked for the engine
+
+
+## Called every frame by the game while the rocket flies: on = engine running.
+func engine(on: bool, boosting := false) -> void:
+	_engine_target = (1.6 if boosting else 1.0) if on else 0.0
+	_engine_seen = 0.0
+
+
+func _process(delta: float) -> void:
+	# The game stops asking when paused / on menus: fade the rumble out.
+	_engine_seen += delta
+	if _engine_seen > 0.2 or get_tree().paused:
+		_engine_target = 0.0
+	_engine_level = move_toward(_engine_level, _engine_target, delta * 2.5)
+	if _engine_level <= 0.01:
+		if _engine.playing:
+			_engine.stop()
+		return
+	if not _engine.playing:
+		_engine.play()
+	_engine.volume_db = linear_to_db(_engine_level * 0.5)
+	_engine.pitch_scale = 0.85 + 0.25 * _engine_level
 
 
 func _ready() -> void:
@@ -31,9 +57,15 @@ func _ready() -> void:
 		_players.append(p)
 	_music = AudioStreamPlayer.new()
 	_music.bus = BUS_MUSIC
-	_music.volume_db = -6.0
+	_music.volume_db = -2.0
 	add_child(_music)
 	_build_sounds()
+	# Engine rumble: a looping player the game turns up/down every frame while flying.
+	_engine = AudioStreamPlayer.new()
+	_engine.bus = BUS_SFX
+	_engine.stream = _wav(_engine_loop(), true)
+	_engine.volume_db = -60.0
+	add_child(_engine)
 	# Music takes a moment to synthesise: do it after the first frames so startup stays quick.
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -127,6 +159,45 @@ func _mix(a: PackedFloat32Array, b: PackedFloat32Array, offset := 0.0) -> Packed
 	return out
 
 
+## Scale a sound so its loudest point is `peak` (they were all made at different levels,
+## and several were too quiet to hear on laptop / phone speakers).
+func _norm(samples: PackedFloat32Array, peak := 0.9) -> PackedFloat32Array:
+	var top := 0.0
+	for s in samples:
+		top = maxf(top, absf(s))
+	if top < 0.0001:
+		return samples
+	var k := peak / top
+	var out := samples.duplicate()
+	for i in out.size():
+		out[i] *= k
+	return out
+
+
+## Seamless 2-second rocket rumble: deep filtered noise plus a low throb.
+func _engine_loop() -> PackedFloat32Array:
+	var n := 2 * RATE
+	var fade := int(0.25 * RATE)
+	var raw := PackedFloat32Array()
+	raw.resize(n + fade)
+	var lp := 0.0
+	var lp2 := 0.0
+	for i in raw.size():
+		lp += (randf_range(-1.0, 1.0) - lp) * 0.06
+		lp2 += (lp - lp2) * 0.12
+		var t := float(i) / RATE
+		raw[i] = lp2 * 6.0 + 0.18 * sin(TAU * 48.0 * t) * (0.7 + 0.3 * sin(TAU * 3.0 * t))
+	# Crossfade the tail into the head so the loop has no click.
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		out[i] = raw[i]
+		if i < fade:
+			var w := float(i) / fade
+			out[i] = raw[i] * w + raw[n + i] * (1.0 - w)
+	return _norm(out, 0.8)
+
+
 func _build_sounds() -> void:
 	_sounds["click"] = _wav(_tone(0.05, 900, 700, "tri", 0.002, 0.35))
 	_sounds["beep"] = _wav(_tone(0.14, 660, 660, "square", 0.003, 0.18))
@@ -146,6 +217,20 @@ func _build_sounds() -> void:
 	_sounds["levelup"] = _wav(fanfare)
 	_sounds["coin"] = _wav(_mix(_tone(0.08, 988, 988, "square", 0.002, 0.15), _tone(0.3, 1319, 1319, "square", 0.002, 0.15), 0.07))
 	_sounds["pause"] = _wav(_mix(_tone(0.12, 660, 660, "tri", 0.003, 0.3), _tone(0.18, 440, 440, "tri", 0.003, 0.3), 0.08))
+	# Booster pods unlatching: metal clunk + hiss.
+	_sounds["detach"] = _wav(_mix(_mix(_tone(0.18, 320, 120, "square", 0.001, 0.4), _tone(0.12, 180, 90, "sine", 0.001, 0.6)),
+		_tone(0.5, 4000, 1500, "noise", 0.01, 0.25), 0.05))
+	# Warning: two quick falling beeps (low fuel / hull damage).
+	_sounds["alarm"] = _wav(_mix(_tone(0.13, 880, 880, "square", 0.003, 0.3), _tone(0.16, 660, 660, "square", 0.003, 0.3), 0.15))
+	# Bring every effect up to the same, clearly audible level.
+	var peaks := {"click": 0.55, "beep": 0.6, "go": 0.65, "coin": 0.6, "pause": 0.6, "alarm": 0.6}
+	for key in _sounds:
+		var wav: AudioStreamWAV = _sounds[key]
+		var samples := PackedFloat32Array()
+		samples.resize(wav.data.size() / 2)
+		for i in samples.size():
+			samples[i] = wav.data.decode_s16(i * 2) / 32000.0
+		_sounds[key] = _wav(_norm(samples, float(peaks.get(key, 0.9))))
 
 
 ## A calm 16-second space loop: slow pad chords plus a soft arpeggio.
@@ -174,4 +259,4 @@ func _make_music() -> AudioStreamWAV:
 		var at := fmod(in_bar, step)
 		var arp := sin(TAU * note * t) * exp(-at * 6.0) * 0.06
 		out[i] = pad + arp
-	return _wav(out, true, MUSIC_RATE)
+	return _wav(_norm(out, 0.7), true, MUSIC_RATE)

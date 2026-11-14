@@ -146,6 +146,7 @@ var race_intro: Control
 static var _profile_checked: bool = false
 
 var state: State = State.MENU
+var _hull_warned := false
 var score: float = 0.0
 var level: int = 1
 var level_time: float = 0.0
@@ -394,6 +395,8 @@ func _process(delta: float) -> void:
 
 	_update_tips(delta)
 	_update_pilot_cards()
+	# Engine rumble while the rocket is flying (louder when boosting).
+	Sound.engine(rocket.flame_on and (state == State.INTRO or state == State.PLAYING), rocket.boosting)
 	if hangar_bg and hangar_bg.visible != (state == State.MENU):
 		hangar_bg.visible = state == State.MENU
 	var show_pause := _can_pause()
@@ -1020,7 +1023,13 @@ func _update_dashboard() -> void:
 	if not is_equal_approx(boost_bar.value, fuel):
 		boost_bar.value = fuel
 	var low_fuel: bool = rocket.has_booster and fuel < 0.25
+	if low_fuel and not caution_light.on and state == State.PLAYING:
+		Sound.play("alarm", 1.0, -4.0)  # master caution comes on
 	caution_light.on = low_fuel
+	# Hull warning: alarm once when it drops to 30% (again after it has been repaired).
+	if hull <= 0.3 and hull > 0.0 and not _hull_warned and state == State.PLAYING:
+		Sound.play("alarm", 0.8)
+	_hull_warned = hull <= 0.3 if hull > 0.0 else _hull_warned
 	_set_modulate(caution_label, Color(1.6, 1.2, 1.2) if low_fuel else Color.WHITE)
 	if not rocket.has_booster:
 		_set_label(fuel_label, "BOOSTER LOST", Palette.BAD)
@@ -1124,6 +1133,7 @@ func _on_booster_lost(pod_positions: Array) -> void:
 			"spin": side * randf_range(3.0, 6.0),
 			"age": 0.0,
 		})
+	Sound.play("detach")
 	_show_toast("BOOSTER EMPTY - DETACHED!", Color(1, 0.45, 0.35))
 
 
