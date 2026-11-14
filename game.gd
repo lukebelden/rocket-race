@@ -2541,6 +2541,7 @@ func _apply_loadout() -> void:
 	ship_agility = float(ship_info.get("agility", 1.0))
 	ship_damage = float(ship_info.get("damage", 1.0))
 	rocket.scale = Vector2.ONE * float(ship_info.get("size", 1.0))
+	rocket.ship = str(Profile.loadout(track)["ship"])
 	var d := Profile.design(track)
 	rocket.paint_main = Color.html(str(d.get("main", "#db3333")))
 	rocket.paint_dark = Color.html(str(d.get("dark", "#991a1f")))

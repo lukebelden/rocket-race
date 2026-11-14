@@ -44,6 +44,7 @@ func show_loadout(track: String) -> void:
 	rocket.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
 	rocket.mods.assign(Profile.loadout(track)["mods"])
 	_ship_size = float(Profile.ship(track).get("size", 1.0))
+	rocket.ship = str(Profile.loadout(track)["ship"])
 	_layout()
 
 

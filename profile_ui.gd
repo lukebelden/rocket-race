@@ -219,6 +219,7 @@ func _rocket_preview(parent: Control) -> void:
 	r.paint_body = Color.html(str(d.get("body", "#f2f5fa")))
 	r.mods.assign(Profile.loadout(_track)["mods"])
 	r.missile_count = 5
+	r.ship = str(Profile.loadout(_track)["ship"])
 	r.scale = Vector2.ONE * 1.8 * float(Profile.ship(_track).get("size", 1.0))
 	r.position = Vector2(75, 72)
 	holder.add_child(r)
