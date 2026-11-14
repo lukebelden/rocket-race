@@ -46,13 +46,18 @@ func _ready() -> void:
 
 
 func _draw() -> void:
-	var r := Rect2(Vector2.ZERO, size)
+	# The whole portrait (top `crop` of it), fitted inside the box - never cut off.
+	var box := Rect2(Vector2.ZERO, size)
 	if framed:
-		draw_rect(r, Color("15181d"))
-		draw_portrait(self, r.grow(-2), pilot, crop)
-		draw_rect(r, Color(accent, 0.8), false, 2.0)
-	else:
-		draw_portrait(self, r, pilot, crop)
+		draw_rect(box, Color("15181d"))
+		box = box.grow(-2)
+	var tex := texture(pilot)
+	var src := Rect2(Vector2.ZERO, Vector2(tex.get_width(), tex.get_height() * crop))
+	var k := minf(box.size.x / src.size.x, box.size.y / src.size.y)
+	var dst := Rect2(box.get_center() - src.size * k / 2.0, src.size * k)
+	draw_texture_rect_region(tex, dst, src)
+	if framed:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(accent, 0.8), false, 2.0)
 
 
 static func id_of(id: String) -> String:

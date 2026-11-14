@@ -1934,10 +1934,14 @@ func _begin_race(info: Dictionary) -> void:
 	var course_seed := int(info.get("seed", 1))
 	course_rng.seed = course_seed
 	station_rng.seed = course_seed * 7919 + 17
+	rivals_node.clear()
 	for p in Net.room.get("players", []):
 		var id := int(p.get("id", 0))
 		if id != Net.my_id:
-			rivals_node.add_rival(id, str(p.get("name", "Pilot")), Color.html(str(p.get("color", "#ffffff"))))
+			var ship := str(p.get("ship", "small"))
+			var ghost_scale := float(Profile.item("ships", ship).get("size", 1.0)) * ROCKET_SCALE
+			rivals_node.add_rival(id, str(p.get("name", "Pilot")), Color.html(str(p.get("color", "#ffffff"))),
+				ship, p.get("paint", {}), p.get("mods", []), ghost_scale)
 			_add_rival_card(id, p)
 	_show_menu()
 	_go_to_pad()
@@ -2390,8 +2394,7 @@ func _make_profile_ui() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 8)
 	profile_avatar = Pilots.new()
-	profile_avatar.crop = 0.6  # head and shoulders
-	profile_avatar.custom_minimum_size = Vector2(44, 44)
+	profile_avatar.custom_minimum_size = Vector2(38, 52)  # portrait-shaped: the whole pilot fits
 	row.add_child(profile_avatar)
 	profile_label = Label.new()
 	profile_label.add_theme_font_size_override("font_size", 16)
